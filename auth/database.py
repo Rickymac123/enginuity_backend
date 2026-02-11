@@ -1,23 +1,13 @@
 # auth/database.py
-import os
 from typing import Generator
+from sqlmodel import SQLModel, Session
 
-from sqlmodel import SQLModel, Session, create_engine
+from app.db import engine  # <- single source of truth
 
+# IMPORTANT: ensure models are imported so SQLModel registers tables
+from auth.models import User  # noqa: F401
 from models.profile import UserProfile  # noqa: F401
-
-DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite:///./database.db"
-
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
-
-engine = create_engine(
-    DATABASE_URL,
-    echo=False,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
-)
+# add other SQLModel tables you have (JobPost, Company, etc) as noqa imports too
 
 def get_session() -> Generator[Session, None, None]:
     with Session(engine) as session:
