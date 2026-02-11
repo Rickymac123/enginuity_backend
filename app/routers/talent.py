@@ -1,0 +1,209 @@
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session, select
+
+from app.db import get_session
+from auth.deps import require_role
+from auth.models import User
+
+from models.talent import Talent, TalentCreate, TalentRead, TalentUpdate
+
+router = APIRouter(tags=["talent"])
+
+
+# ===================== TALENT (AGENCY) =====================
+
+@router.post("/talent/", response_model=TalentRead)
+def create_talent(
+    talent_in: TalentCreate,
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+):
+    data = talent_in.model_dump()
+
+    # Hard-lock ownership
+    data.pop("agency_id", None)
+    data.pop("user_id", None)
+    data.pop("id", None)
+
+    talent = Talent(**data, agency_id=user.id, user_id=None)
+    session.add(talent)
+    session.commit()
+    session.refresh(talent)
+    return talent
+
+
+@router.get("/talent/", response_model=List[TalentRead])
+def list_talent(
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+    location: Optional[str] = None,
+    profession: Optional[str] = None,
+    min_day_rate: Optional[float] = None,
+    max_day_rate: Optional[float] = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    statement = select(Talent).where(
+        Talent.agency_id == user.id,
+        Talent.user_id == None,  # noqa: E711
+    )
+
+    if location:
+        statement = statement.where(Talent.location.contains(location))
+    if profession:
+        statement = statement.where(Talent.profession.contains(profession))
+    if min_day_rate is not None:
+        statement = statement.where(Talent.day_rate >= min_day_rate)
+    if max_day_rate is not None:
+        statement = statement.where(Talent.day_rate <= max_day_rate)
+
+    statement = statement.offset(offset).limit(limit)
+    return session.exec(statement).all()
+
+
+@router.get("/talent/{talent_id}", response_model=TalentRead)
+def get_talent(
+    talent_id: int,
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+):
+    talent = session.get(Talent, talent_id)
+    if (
+        not talent
+        or talent.agency_id != user.id
+        or talent.user_id is not None
+    ):
+        raise HTTPException(status_code=404, detail="Talent not found")
+    return talent
+
+
+@router.patch("/talent/{talent_id}", response_model=TalentRead)
+def update_talent(
+    talent_id: int,
+    talent_update: TalentUpdate,
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+):
+    db_talent = session.get(Talent, talent_id)
+    if (
+        not db_talent
+        or db_talent.agency_id != user.id
+        or db_talent.user_id is not None
+    ):
+        raise HTTPException(status_code=404, detail="Talent not found")
+
+    update_data = talent_update.model_dump(exclude_unset=True)
+
+    # Never allow ownership / identity changes
+    for k in ("id", "agency_id", "user_id", "created_at", "updated_at"):
+        update_data.pop(k, None)
+
+    for key, value in update_data.items():
+        setattr(db_talent, key, value)
+
+    session.add(db_talent)
+    session.commit()
+    session.refresh(db_talent)
+    return db_talent
+
+
+@router.delete("/talent/{talent_id}", status_code=204)
+def delete_talent(
+    talent_id: int,
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+):
+    talent = session.get(Talent, talent_id)
+    if (
+        not talent
+        or talent.agency_id != user.id
+        or talent.user_id is not None
+    ):
+        raise HTTPException(status_code=404, detail="Talent not found")
+
+    session.delete(talent)
+    session.commit()
+    return None
+
+
+# ===================== TALENT (PROFESSIONAL) =====================
+
+@router.post("/professional/talent", response_model=TalentRead)
+def create_my_talent(
+    talent_in: TalentCreate,
+    user: User = Depends(require_role("professional")),
+    session: Session = Depends(get_session),
+):
+    existing = session.exec(
+        select(Talent).where(
+            Talent.user_id == user.id,
+            Talent.agency_id == None,  # noqa: E711
+        )
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Talent profile already exists")
+
+    data = talent_in.model_dump()
+
+    # Hard-lock ownership
+    data.pop("agency_id", None)
+    data.pop("user_id", None)
+    data.pop("id", None)
+
+    talent = Talent(**data, user_id=user.id, agency_id=None)
+    session.add(talent)
+    session.commit()
+    session.refresh(talent)
+    return talent
+
+
+@router.get("/professional/talent/me", response_model=TalentRead)
+def get_my_talent(
+    user: User = Depends(require_role("professional")),
+    session: Session = Depends(get_session),
+):
+    talent = session.exec(
+        select(Talent).where(
+            Talent.user_id == user.id,
+            Talent.agency_id == None,  # noqa: E711
+        )
+    ).first()
+
+    if not talent:
+        raise HTTPException(status_code=404, detail="Talent profile not found")
+
+    return talent
+
+
+@router.patch("/professional/talent/me", response_model=TalentRead)
+def update_my_talent(
+    payload: TalentUpdate,
+    user: User = Depends(require_role("professional")),
+    session: Session = Depends(get_session),
+):
+    talent = session.exec(
+        select(Talent).where(
+            Talent.user_id == user.id,
+            Talent.agency_id == None,  # noqa: E711
+        )
+    ).first()
+
+    if not talent:
+        raise HTTPException(status_code=404, detail="Talent profile not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+
+    # Never allow ownership / identity changes
+    for k in ("id", "agency_id", "user_id", "created_at", "updated_at"):
+        update_data.pop(k, None)
+
+    for key, value in update_data.items():
+        setattr(talent, key, value)
+
+    session.add(talent)
+    session.commit()
+    session.refresh(talent)
+    return talent

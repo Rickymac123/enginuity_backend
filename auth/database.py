@@ -1,14 +1,25 @@
-from sqlmodel import SQLModel
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+# auth/database.py
 
-DATABASE_URL = "sqlite+aiosqlite:///./database.db"
+from models.profile import UserProfile  # noqa: F401
 
-engine = create_async_engine(DATABASE_URL, echo=True)
-async_session_maker = sessionmaker(
-    bind=engine, class_=AsyncSession, expire_on_commit=False
+from typing import Generator
+
+from sqlmodel import SQLModel, Session, create_engine
+
+DATABASE_URL = "sqlite:///./database.db"
+
+engine = create_engine(
+    DATABASE_URL,
+    echo=True,
 )
 
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+
+def get_session() -> Generator[Session, None, None]:
+    """FastAPI dependency that yields a sync SQLModel Session."""
+    with Session(engine) as session:
+        yield session
+
+
+def init_db() -> None:
+    """Create all tables."""
+    SQLModel.metadata.create_all(engine)
