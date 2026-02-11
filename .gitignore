@@ -23,3 +23,15 @@ node_modules/
 test.jpg
 test.pdf
 cookies.txt
+
+# Local / scratch
+app.db
+cookies.txt
+test.jpg
+test.pdf
+
+# Frontend lives in its own repo
+rmc-frontend/
+
+# Scripts (only keep if you actually want these in backend repo)
+# scripts/
