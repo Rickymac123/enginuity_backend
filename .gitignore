@@ -35,3 +35,9 @@ rmc-frontend/
 
 # Scripts (only keep if you actually want these in backend repo)
 # scripts/
+
+# Not part of backend repo
+package.json
+package-lock.json
+scripts/
+EOF
