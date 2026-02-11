@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual env
+venv/
+.env
+
+# Database
+database.db
+
+# Node
+node_modules/
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Misc
+*.log
+test.jpg
+test.pdf
+cookies.txt
