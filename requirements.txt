@@ -12,3 +12,5 @@ httpx
 passlib[bcrypt]
 python-jose[cryptography]
 boto3
+
+fastapi-users[sqlalchemy]
