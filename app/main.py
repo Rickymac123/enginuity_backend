@@ -1,4 +1,4 @@
-cat > app/main.py <<'EOF'
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -77,4 +77,3 @@ def health():
 @app.get("/")
 def read_root():
     return {"message": "Welcome to Enginuity API"}
-EOF
