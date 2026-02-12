@@ -1,12 +1,28 @@
+cat > app/main.py <<'EOF'
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from auth.users import auth_backend, fastapi_users
-from auth.schemas import UserCreate, UserRead
+from auth.users import fastapi_users, auth_backend
+from auth.schemas import UserRead, UserCreate, UserUpdate
+from auth.database import init_db
 
-app = FastAPI()
+from app.routers.profile import router as profile_router
+from app.routers.talent import router as talent_router
+from app.routers.companies import router as companies_router
+from app.routers.jobs import router as jobs_router
+from app.routers.applications import router as applications_router
+from app.routers.bookings import router as bookings_router
+from app.routers.dashboards import router as dashboards_router
+from app.routers.admin import router as admin_router
+from app.routers.uploads import router as uploads_router
+from app.routers.availability import router as availability_router
 
-# CORS (adjust origins later if you want to lock it down)
+
+app = FastAPI(title="Enginuity API")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -15,20 +31,50 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Auth routes
+# --- FastAPI Users routes ---
+app.include_router(
+    fastapi_users.get_users_router(UserRead, UserUpdate),
+    prefix="/users",
+    tags=["users"],
+)
 app.include_router(
     fastapi_users.get_auth_router(auth_backend),
     prefix="/auth/jwt",
     tags=["auth"],
 )
-
 app.include_router(
     fastapi_users.get_register_router(UserRead, UserCreate),
     prefix="/auth",
     tags=["auth"],
 )
+# Only include verify router if you actually have email verification configured
+# app.include_router(
+#     fastapi_users.get_verify_router(UserRead),
+#     prefix="/auth",
+#     tags=["auth"],
+# )
 
-# Health
+# --- Your app routers ---
+app.include_router(profile_router)
+app.include_router(talent_router)
+app.include_router(companies_router)
+app.include_router(jobs_router)
+app.include_router(applications_router)
+app.include_router(bookings_router)
+app.include_router(dashboards_router)
+app.include_router(admin_router)
+app.include_router(uploads_router)
+app.include_router(availability_router)
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
 @app.get("/health")
 def health():
     return {"ok": True}
+
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to Enginuity API"}
+EOF
