@@ -11,7 +11,11 @@ from auth.models import User
 
 from models.jobpost import JobPost
 from models.talent import Talent
-from models.application import TalentApplication, TalentApplicationRead, TalentApplicationUpdate
+from models.application import (
+    TalentApplication,
+    TalentApplicationRead,
+    TalentApplicationUpdate,
+)
 
 router = APIRouter(tags=["applications"])
 
@@ -36,9 +40,10 @@ def professional_apply_to_job(
     talent = session.exec(
         select(Talent).where(
             Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
+            Talent.agency_id == None,  # noqa
         )
     ).first()
+
     if not talent:
         raise HTTPException(status_code=404, detail="Talent profile not found")
 
@@ -48,6 +53,7 @@ def professional_apply_to_job(
             TalentApplication.talent_id == talent.id,
         )
     ).first()
+
     if existing:
         raise HTTPException(status_code=400, detail="Application already exists")
 
@@ -57,13 +63,14 @@ def professional_apply_to_job(
         status="pending",
         notes=payload.notes,
     )
+
     session.add(app_obj)
     session.commit()
     session.refresh(app_obj)
     return app_obj
 
 
-# ===================== APPLICATIONS (PROFESSIONAL VIEW MY APPLICATIONS) =====================
+# ===================== PROFESSIONAL: VIEW MY APPLICATIONS =====================
 
 @router.get("/professional/applications", response_model=List[dict])
 def professional_list_my_applications(
@@ -73,7 +80,7 @@ def professional_list_my_applications(
     my_talent = session.exec(
         select(Talent).where(
             Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
+            Talent.agency_id == None,  # noqa
         )
     ).first()
 
@@ -81,7 +88,9 @@ def professional_list_my_applications(
         return []
 
     apps = session.exec(
-        select(TalentApplication).where(TalentApplication.talent_id == my_talent.id)
+        select(TalentApplication).where(
+            TalentApplication.talent_id == my_talent.id
+        )
     ).all()
 
     if not apps:
@@ -92,6 +101,7 @@ def professional_list_my_applications(
     job_map = {j.id: j for j in jobs}
 
     out: List[dict] = []
+
     for a in apps:
         j = job_map.get(a.jobpost_id)
         out.append(
@@ -109,10 +119,11 @@ def professional_list_my_applications(
                 "job_day_rate_max": getattr(j, "day_rate_max", None) if j else None,
             }
         )
+
     return out
 
 
-# ===================== APPLICATIONS (VIEW JOB APPLICATIONS) =====================
+# ===================== COMPANY / AGENCY / PROFESSIONAL: VIEW JOB APPLICATIONS =====================
 
 @router.get("/jobs/{job_id}/applications", response_model=List[dict])
 def list_applications_for_job(
@@ -127,41 +138,72 @@ def list_applications_for_job(
     if user.role == "company" and job.company_id != user.id:
         raise HTTPException(status_code=403, detail="Not your job")
 
-    apps_stmt = select(TalentApplication).where(TalentApplication.jobpost_id == job_id)
+    apps_stmt = select(TalentApplication).where(
+        TalentApplication.jobpost_id == job_id
+    )
 
     if user.role == "agency":
         talent_ids = session.exec(
             select(Talent.id).where(
                 Talent.agency_id == user.id,
-                Talent.user_id == None,  # noqa: E711
+                Talent.user_id == None,  # noqa
             )
         ).all()
+
         if not talent_ids:
             return []
-        apps_stmt = apps_stmt.where(TalentApplication.talent_id.in_(talent_ids))
+
+        apps_stmt = apps_stmt.where(
+            TalentApplication.talent_id.in_(talent_ids)
+        )
 
     elif user.role == "professional":
         my_talent = session.exec(
             select(Talent).where(
                 Talent.user_id == user.id,
-                Talent.agency_id == None,  # noqa: E711
+                Talent.agency_id == None,  # noqa
             )
         ).first()
+
         if not my_talent:
             return []
-        apps_stmt = apps_stmt.where(TalentApplication.talent_id == my_talent.id)
+
+        apps_stmt = apps_stmt.where(
+            TalentApplication.talent_id == my_talent.id
+        )
 
     apps = session.exec(apps_stmt).all()
+
     if not apps:
         return []
 
     talent_ids = list({a.talent_id for a in apps})
-    talents = session.exec(select(Talent).where(Talent.id.in_(talent_ids))).all()
+    talents = session.exec(
+        select(Talent).where(Talent.id.in_(talent_ids))
+    ).all()
+
     talent_map = {t.id: t for t in talents}
 
+    # 👇 Pull related Users so we can build full name
+    user_ids = list({t.user_id for t in talents if t.user_id})
+    users = session.exec(
+        select(User).where(User.id.in_(user_ids))
+    ).all()
+
+    user_map = {u.id: u for u in users}
+
     out: List[dict] = []
+
     for a in apps:
         t = talent_map.get(a.talent_id)
+        u = user_map.get(t.user_id) if t and t.user_id else None
+
+        full_name = None
+        if u:
+            first = u.first_name or ""
+            last = u.last_name or ""
+            full_name = f"{first} {last}".strip() or None
+
         out.append(
             {
                 "application_id": a.id,
@@ -171,16 +213,18 @@ def list_applications_for_job(
                 "created_at": getattr(a, "created_at", None),
                 "updated_at": getattr(a, "updated_at", None),
                 "talent_id": a.talent_id,
-                "talent_name": getattr(t, "name", None) if t else None,
+                "talent_name": full_name,
                 "talent_profession": getattr(t, "profession", None) if t else None,
                 "talent_location": getattr(t, "location", None) if t else None,
                 "talent_day_rate": getattr(t, "day_rate", None) if t else None,
+                "talent_avatar_url": getattr(t, "avatar_url", None) if t else None,
             }
         )
+
     return out
 
 
-# ===================== APPLICATIONS (UPDATE) =====================
+# ===================== APPLICATION UPDATE =====================
 
 @router.patch("/applications/{application_id}", response_model=TalentApplicationRead)
 def update_application(
