@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import quote
 
 from fastapi import Depends, Request
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from fastapi_users import FastAPIUsers, IntegerIDMixin
 from fastapi_users.authentication import (
@@ -21,6 +21,9 @@ from fastapi_users_db_sqlmodel import SQLModelUserDatabase
 from auth.database import get_session
 from auth.emailer import send_email
 from auth.models import User
+
+from models.talent import Talent  # NEW
+
 
 # IMPORTANT: set these in env (Codespaces secrets / .env)
 SECRET = os.getenv("SECRET", "SUPER_SECRET_JWT")
@@ -66,6 +69,64 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         request: Optional[Request] = None,
     ) -> None:
         print(f"✅ User registered: id={user.id} email={user.email}")
+
+        # --- NEW: auto-create Talent profile when role == professional ---
+        try:
+            if getattr(user, "role", None) == "professional":
+                session: Session = self.user_db.session  # SQLModelUserDatabase session
+
+                # Prevent duplicate Talent rows for same user
+                existing = session.exec(
+                    select(Talent).where(
+                        Talent.user_id == user.id,
+                        Talent.agency_id == None,  # noqa: E711
+                    )
+                ).first()
+
+                if not existing:
+                    payload = {}
+                    if request is not None:
+                        try:
+                            payload = await request.json()
+                        except Exception:
+                            payload = {}
+
+                    # Prefer payload (signup form) then fall back to user fields
+                    first_name = (payload.get("first_name") or getattr(user, "first_name", "") or "").strip()
+                    last_name = (payload.get("last_name") or getattr(user, "last_name", "") or "").strip()
+                    profession = (payload.get("profession") or "").strip()
+                    location = (payload.get("location") or "").strip()
+
+                    # If your frontend doesn’t send profession/location yet, this will still create
+                    # a minimally-valid record only if you relax DB constraints.
+                    # With your schema validator, profession/location should be present for professionals.
+                    talent = Talent(
+                        user_id=user.id,
+                        agency_id=None,
+                        first_name=first_name,
+                        last_name=last_name,
+                        profession=profession,
+                        location=location,
+                        postcode=payload.get("postcode"),
+                        work_radius_miles=payload.get("work_radius_miles"),
+                        ir35_preference=payload.get("ir35_preference"),
+                        engineering_discipline=payload.get("engineering_discipline"),
+                        industry=payload.get("industry"),
+                        rate_type=payload.get("rate_type"),
+                        day_rate=payload.get("day_rate"),
+                        hourly_rate=payload.get("hourly_rate"),
+                        bio=payload.get("bio"),
+                        avatar_url=payload.get("avatar_url") or getattr(user, "avatar_url", None),
+                    )
+
+                    session.add(talent)
+                    session.commit()
+                    session.refresh(talent)
+                    print(f"✅ Talent profile created: talent_id={talent.id} for user_id={user.id}")
+        except Exception as e:
+            # Don't block registration if Talent creation fails
+            print(f"❌ Failed to auto-create Talent profile for user_id={user.id}: {e}")
+
         # Trigger verify email on signup
         await self.request_verify(user, request)
 
@@ -78,7 +139,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         # Frontend page should POST token to backend: POST /auth/verify { "token": "..." }
         verify_link = f"{FRONTEND_BASE_URL}/verify?token={quote(token)}"
 
-        subject = "Verify your email for RMC Hub"
+        subject = "Verify your email for Conotract Pro's UK"
         html = f"""
         <div style="font-family:Arial,sans-serif;line-height:1.5">
           <h2>Verify your email</h2>

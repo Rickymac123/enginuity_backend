@@ -12,6 +12,15 @@ from models.talent import Talent, TalentCreate, TalentRead, TalentUpdate
 router = APIRouter(tags=["talent"])
 
 
+def _get_my_talent(session: Session, user: User) -> Optional[Talent]:
+    return session.exec(
+        select(Talent).where(
+            Talent.user_id == user.id,
+            Talent.agency_id == None,  # noqa: E711
+        )
+    ).first()
+
+
 # ===================== TALENT (AGENCY) =====================
 
 @router.post("/talent/", response_model=TalentRead)
@@ -75,7 +84,7 @@ def get_talent(
         or talent.agency_id != user.id
         or talent.user_id is not None
     ):
-        raise HTTPException(status_code=404, detail="Talent not found")
+        raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
     return talent
 
 
@@ -92,7 +101,7 @@ def update_talent(
         or db_talent.agency_id != user.id
         or db_talent.user_id is not None
     ):
-        raise HTTPException(status_code=404, detail="Talent not found")
+        raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
 
     update_data = talent_update.model_dump(exclude_unset=True)
 
@@ -121,7 +130,7 @@ def delete_talent(
         or talent.agency_id != user.id
         or talent.user_id is not None
     ):
-        raise HTTPException(status_code=404, detail="Talent not found")
+        raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
 
     session.delete(talent)
     session.commit()
@@ -136,15 +145,10 @@ def create_my_talent(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
 ):
-    existing = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        )
-    ).first()
-
+    # Idempotent: if it already exists, just return it.
+    existing = _get_my_talent(session, user)
     if existing:
-        raise HTTPException(status_code=400, detail="Talent profile already exists")
+        return existing
 
     data = talent_in.model_dump()
 
@@ -165,16 +169,11 @@ def get_my_talent(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
 ):
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        )
-    ).first()
-
+    talent = _get_my_talent(session, user)
     if not talent:
-        raise HTTPException(status_code=404, detail="Talent profile not found")
-
+        # Use a machine-friendly code so the frontend can show a nice CTA
+        # (e.g. "Complete your profile to apply for jobs")
+        raise HTTPException(status_code=404, detail="TALENT_PROFILE_NOT_FOUND")
     return talent
 
 
@@ -184,15 +183,9 @@ def update_my_talent(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
 ):
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        )
-    ).first()
-
+    talent = _get_my_talent(session, user)
     if not talent:
-        raise HTTPException(status_code=404, detail="Talent profile not found")
+        raise HTTPException(status_code=404, detail="TALENT_PROFILE_NOT_FOUND")
 
     update_data = payload.model_dump(exclude_unset=True)
 
