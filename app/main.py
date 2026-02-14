@@ -1,4 +1,3 @@
-
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -20,8 +19,7 @@ from app.routers.admin import router as admin_router
 from app.routers.uploads import router as uploads_router
 from app.routers.availability import router as availability_router
 
-
-app = FastAPI(title="Enginuity API")
+app = FastAPI(title="ContractPros API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,14 +45,13 @@ app.include_router(
     prefix="/auth",
     tags=["auth"],
 )
-# Only include verify router if you actually have email verification configured
-# app.include_router(
-#     fastapi_users.get_verify_router(UserRead),
-#     prefix="/auth",
-#     tags=["auth"],
-# )
+app.include_router(
+    fastapi_users.get_verify_router(UserRead),
+    prefix="/auth",
+    tags=["auth"],
+)
 
-# --- Your app routers ---
+# --- App routers ---
 app.include_router(profile_router)
 app.include_router(talent_router)
 app.include_router(companies_router)
@@ -76,4 +73,4 @@ def health():
 
 @app.get("/")
 def read_root():
-    return {"message": "Welcome to Enginuity API"}
+    return {"message": "Welcome to ContractPros API"}
