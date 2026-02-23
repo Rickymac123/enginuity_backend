@@ -97,7 +97,7 @@ def create_review_invite(
 def submit_imported_review(
     payload: SubmitImportedReview,
     session: Session = Depends(get_session),
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     token_hash = hash_token(payload.invite_token)
 
     invite = session.exec(
@@ -147,12 +147,24 @@ def submit_imported_review(
     session.commit()
 
     verify_url = f"{FRONTEND_BASE_URL}/reviews/verify?token={raw_verify_token}"
-    send_review_verification_email(
-        to_email=payload.reviewer_email,
-        verify_url=verify_url,
-    )
 
-    return {"detail": "CHECK_EMAIL_TO_VERIFY"}
+    email_sent = True
+    try:
+        send_review_verification_email(
+            to_email=payload.reviewer_email,
+            verify_url=verify_url,
+        )
+    except Exception as e:
+        email_sent = False
+        print(f"❌ Review verification email failed: {e}")
+
+    # IMPORTANT: don't 500 if SMTP is blocked (Render often blocks outbound SMTP)
+    return {
+        "detail": "REVIEW_CREATED_PENDING_VERIFICATION"
+        if email_sent
+        else "REVIEW_CREATED_EMAIL_NOT_SENT",
+        "email_sent": email_sent,
+    }
 
 
 @router.post("/public/reviews/verify")
@@ -199,7 +211,7 @@ def verify_review(
 def send_review_reminders(
     session: Session = Depends(get_session),
     x_job_secret: str = Header(default=""),
-) -> Dict[str, int]:
+) -> Dict[str, Any]:
     if not REMINDER_JOB_SECRET or x_job_secret != REMINDER_JOB_SECRET:
         raise HTTPException(status_code=401, detail="UNAUTHORIZED")
 
@@ -216,6 +228,8 @@ def send_review_reminders(
     ).all()
 
     sent = 0
+    failed = 0
+
     for v in verifications:
         review = session.exec(
             select(Review).where(Review.id == v.review_id)
@@ -229,13 +243,18 @@ def send_review_reminders(
         v.reminded_at = now
 
         verify_url = f"{FRONTEND_BASE_URL}/reviews/verify?token={raw}"
-        send_review_verification_email(
-            to_email=review.reviewer_email,
-            verify_url=verify_url,
-        )
+
+        try:
+            send_review_verification_email(
+                to_email=review.reviewer_email,
+                verify_url=verify_url,
+            )
+            sent += 1
+        except Exception as e:
+            failed += 1
+            print(f"❌ Review reminder email failed: review_id={review.id} err={e}")
 
         session.add(v)
-        sent += 1
 
     session.commit()
-    return {"sent": sent}
+    return {"sent": sent, "failed": failed, "candidates": len(verifications)}
