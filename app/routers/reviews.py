@@ -1,8 +1,10 @@
+# app/routers/reviews.py
+
 import os
 import secrets
 import hashlib
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlmodel import Session, select
@@ -12,11 +14,10 @@ from auth.users import fastapi_users
 from auth.models import User
 from auth.emailer import send_email
 
-from auth.schemas import SubmitImportedReview  # must exist in your auth/schemas.py
+from auth.schemas import SubmitImportedReview  # ensure this exists
 from models.review import Review
 from models.review_invite import ReviewInvite
 from models.review_verification import ReviewVerification
-
 
 router = APIRouter(tags=["reviews"])
 
@@ -24,6 +25,10 @@ FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstr
 REMINDER_JOB_SECRET = os.getenv("REMINDER_JOB_SECRET", "")
 
 current_active_user = fastapi_users.current_user(active=True)
+
+
+def utcnow() -> datetime:
+    return datetime.utcnow()
 
 
 def require_professional(user: User = Depends(current_active_user)) -> User:
@@ -52,12 +57,8 @@ def send_review_verification_email(to_email: str, verify_url: str) -> None:
                 Confirm review
             </a>
         </p>
-        <p style="font-size:12px;color:#666">
-            This link expires in 14 days.
-        </p>
-        <p style="font-size:12px;color:#666">
-            If you did not submit this review, you can ignore this email.
-        </p>
+        <p style="font-size:12px;color:#666">This link expires in 14 days.</p>
+        <p style="font-size:12px;color:#666">If you did not submit this review, you can ignore this email.</p>
     </div>
     """
     send_email(
@@ -67,17 +68,56 @@ def send_review_verification_email(to_email: str, verify_url: str) -> None:
     )
 
 
+@router.get("/professional/me/preview")
+def get_my_profile_preview(
+    session: Session = Depends(get_session),
+    user: User = Depends(require_professional),
+) -> Dict[str, Any]:
+    """
+    Returns what a client would see for this professional:
+    - basic user identity fields
+    - verified + public reviews only
+    - rating stats (average + count)
+    """
+    reviews: List[Review] = session.exec(
+        select(Review)
+        .where(
+            Review.professional_id == user.id,
+            Review.status == "verified",
+            Review.is_public == True,  # noqa: E712
+        )
+        .order_by(Review.created_at.desc())
+    ).all()
+
+    ratings = [r.rating for r in reviews if isinstance(getattr(r, "rating", None), int)]
+    avg = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+
+    return {
+        "user": {
+            "id": user.id,
+            "first_name": getattr(user, "first_name", "") or "",
+            "last_name": getattr(user, "last_name", "") or "",
+            "avatar_url": getattr(user, "avatar_url", None),
+        },
+        "stats": {
+            "review_count": len(ratings),
+            "average_rating": avg,
+        },
+        "reviews": [r.model_dump() for r in reviews],
+    }
+
+
 @router.post("/professional/review-invites")
 def create_review_invite(
     session: Session = Depends(get_session),
     user: User = Depends(require_professional),
-):
+) -> Dict[str, Any]:
     raw_token = generate_token()
 
     invite = ReviewInvite(
         professional_id=user.id,
         token_hash=hash_token(raw_token),
-        expires_at=datetime.utcnow() + timedelta(days=14),
+        expires_at=utcnow() + timedelta(days=14),
         uses=0,
         max_uses=1,
     )
@@ -96,17 +136,15 @@ def create_review_invite(
 def submit_imported_review(
     payload: SubmitImportedReview,
     session: Session = Depends(get_session),
-):
+) -> Dict[str, str]:
     token_hash = hash_token(payload.invite_token)
 
-    invite = session.exec(
-        select(ReviewInvite).where(ReviewInvite.token_hash == token_hash)
-    ).first()
-
+    invite = session.exec(select(ReviewInvite).where(ReviewInvite.token_hash == token_hash)).first()
     if not invite:
         raise HTTPException(status_code=400, detail="INVALID_INVITE")
 
-    if invite.expires_at < datetime.utcnow():
+    now = utcnow()
+    if invite.expires_at < now:
         raise HTTPException(status_code=400, detail="INVITE_EXPIRED")
 
     if invite.uses >= invite.max_uses:
@@ -136,7 +174,7 @@ def submit_imported_review(
     verification = ReviewVerification(
         review_id=review.id,
         token_hash=hash_token(raw_verify_token),
-        expires_at=datetime.utcnow() + timedelta(days=14),
+        expires_at=now + timedelta(days=14),
     )
 
     session.add(verification)
@@ -156,20 +194,21 @@ def submit_imported_review(
 def verify_review(
     token: str = Query(...),
     session: Session = Depends(get_session),
-):
+) -> Dict[str, str]:
     token_hash = hash_token(token)
 
     verification = session.exec(
         select(ReviewVerification).where(ReviewVerification.token_hash == token_hash)
     ).first()
-
     if not verification:
         raise HTTPException(status_code=400, detail="INVALID_TOKEN")
+
+    now = utcnow()
 
     if verification.used_at:
         raise HTTPException(status_code=400, detail="TOKEN_ALREADY_USED")
 
-    if verification.expires_at < datetime.utcnow():
+    if verification.expires_at < now:
         raise HTTPException(status_code=400, detail="TOKEN_EXPIRED")
 
     review = session.exec(select(Review).where(Review.id == verification.review_id)).first()
@@ -177,10 +216,10 @@ def verify_review(
         raise HTTPException(status_code=400, detail="REVIEW_NOT_FOUND")
 
     review.status = "verified"
-    review.verified_at = datetime.utcnow()
+    review.verified_at = now
     session.add(review)
 
-    verification.used_at = datetime.utcnow()
+    verification.used_at = now
     session.add(verification)
 
     session.commit()
@@ -191,14 +230,14 @@ def verify_review(
 def send_review_reminders(
     session: Session = Depends(get_session),
     x_job_secret: str = Header(default=""),
-):
+) -> Dict[str, int]:
     if not REMINDER_JOB_SECRET or x_job_secret != REMINDER_JOB_SECRET:
         raise HTTPException(status_code=401, detail="UNAUTHORIZED")
 
-    now = datetime.utcnow()
+    now = utcnow()
     cutoff = now - timedelta(days=7)
 
-    verifications = session.exec(
+    verifications: List[ReviewVerification] = session.exec(
         select(ReviewVerification).where(
             ReviewVerification.used_at == None,        # noqa: E711
             ReviewVerification.expires_at > now,
