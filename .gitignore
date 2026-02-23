@@ -39,5 +39,5 @@ rmc-frontend/
 # Not part of backend repo
 package.json
 package-lock.json
-scripts/
+scripts/cleanup_users.py
 EOF
