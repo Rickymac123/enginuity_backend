@@ -7,6 +7,9 @@ from app.db import engine  # <- single source of truth
 # IMPORTANT: ensure models are imported so SQLModel registers tables
 from auth.models import User  # noqa: F401
 from models.profile import UserProfile  # noqa: F401
+from models.review import Review  # noqa: F401
+from models.review_invite import ReviewInvite  # noqa: F401
+from models.review_verification import ReviewVerification  # noqa: F401
 # add other SQLModel tables you have (JobPost, Company, etc) as noqa imports too
 
 def get_session() -> Generator[Session, None, None]:

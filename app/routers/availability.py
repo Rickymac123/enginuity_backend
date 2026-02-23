@@ -1,14 +1,20 @@
-from datetime import datetime
+# app/routers/availability.py
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta
 from typing import List, Optional
 
+from dateutil.parser import isoparse
+from dateutil.rrule import rrulestr
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select, and_
+from sqlmodel import Session, select
 
 from app.db import get_session
 from auth.deps import require_role
 from auth.models import User
 from models.availability import (
-    AvailabilityBlock,
+    Availability,
     AvailabilityCreate,
     AvailabilityRead,
     AvailabilityUpdate,
@@ -17,57 +23,175 @@ from models.availability import (
 router = APIRouter(tags=["availability"])
 
 ALLOWED_STATUS = {"busy", "available"}
+RECURRENCE_LOOKAHEAD_DAYS = 365
 
 
+# -------------------------------------------------
+# Helpers
+# -------------------------------------------------
 def _validate_block(start_at: datetime, end_at: datetime, status: str) -> None:
-    if not start_at or not end_at:
+    if start_at is None or end_at is None:
         raise HTTPException(status_code=400, detail="start_at and end_at are required")
     if end_at <= start_at:
         raise HTTPException(status_code=400, detail="end_at must be after start_at")
     if status not in ALLOWED_STATUS:
-        raise HTTPException(status_code=400, detail=f"status must be one of {sorted(ALLOWED_STATUS)}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"status must be one of {sorted(ALLOWED_STATUS)}",
+        )
 
 
-def _overlaps_exist(
+def _blocks_overlap(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    return a_start < b_end and a_end > b_start
+
+
+def _parse_exdates(exdates: Optional[str]) -> set[datetime]:
+    if not exdates:
+        return set()
+
+    out: set[datetime] = set()
+    for raw in exdates.split(","):
+        s = raw.strip()
+        if not s:
+            continue
+        try:
+            out.add(isoparse(s))
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid exdates datetime: {s}")
+    return out
+
+
+def _generate_occurrences(block: Availability, window_start: datetime, window_end: datetime):
+    duration = block.end_at - block.start_at
+
+    # Non-recurring
+    if not block.rrule:
+        if _blocks_overlap(block.start_at, block.end_at, window_start, window_end):
+            yield (block.start_at, block.end_at)
+        return
+
+    try:
+        rule = rrulestr(block.rrule, dtstart=block.start_at)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid rrule")
+
+    ex = _parse_exdates(block.exdates)
+
+    for dt in rule.between(window_start, window_end, inc=True):
+        if dt in ex:
+            continue
+        yield (dt, dt + duration)
+
+
+def _conflict_exists(
     session: Session,
     user_id: int,
-    start_at: datetime,
-    end_at: datetime,
+    new_start: datetime,
+    new_end: datetime,
     *,
     exclude_id: Optional[int] = None,
 ) -> bool:
-    # Overlap condition: existing.start < new_end AND existing.end > new_start
-    stmt = (
-        select(AvailabilityBlock)
-        .where(
-            AvailabilityBlock.user_id == user_id,
-            AvailabilityBlock.status == "busy",
-            AvailabilityBlock.start_at < end_at,
-            AvailabilityBlock.end_at > start_at,
-        )
+    window_end = max(new_end, datetime.utcnow()) + timedelta(days=RECURRENCE_LOOKAHEAD_DAYS)
+
+    stmt = select(Availability).where(
+        Availability.user_id == user_id,
+        Availability.status == "busy",
     )
-    if exclude_id is not None:
-        stmt = stmt.where(AvailabilityBlock.id != exclude_id)
+    blocks = session.exec(stmt).all()
 
-    return session.exec(stmt).first() is not None
+    for block in blocks:
+        if exclude_id and block.id == exclude_id:
+            continue
 
+        for occ_start, occ_end in _generate_occurrences(block, new_start, window_end):
+            if _blocks_overlap(occ_start, occ_end, new_start, new_end):
+                return True
+
+    return False
+
+
+# -------------------------------------------------
+# Routes
+# -------------------------------------------------
 
 @router.get("/professional/availability", response_model=List[AvailabilityRead])
 def list_my_availability(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
-    start: Optional[datetime] = Query(default=None, description="Filter: start_at >= start (UTC)"),
-    end: Optional[datetime] = Query(default=None, description="Filter: start_at < end (UTC)"),
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
 ):
-    stmt = select(AvailabilityBlock).where(AvailabilityBlock.user_id == user.id)
+    """
+    If start & end provided:
+        return expanded occurrences within that range
+    Else:
+        return raw stored blocks
+    """
 
-    if start is not None:
-        stmt = stmt.where(AvailabilityBlock.start_at >= start)
-    if end is not None:
-        stmt = stmt.where(AvailabilityBlock.start_at < end)
+    stmt = select(Availability).where(Availability.user_id == user.id)
+    blocks = session.exec(stmt).all()
 
-    stmt = stmt.order_by(AvailabilityBlock.start_at)
-    return session.exec(stmt).all()
+    if not start or not end:
+        return blocks
+
+    expanded: List[AvailabilityRead] = []
+
+    for block in blocks:
+        for occ_start, occ_end in _generate_occurrences(block, start, end):
+            expanded.append(
+                AvailabilityRead(
+                    id=block.id,
+                    user_id=block.user_id,
+                    start_at=occ_start,
+                    end_at=occ_end,
+                    status=block.status,
+                    title=block.title,
+                    notes=block.notes,
+                    timezone=block.timezone,
+                    series_id=block.series_id,
+                    rrule=block.rrule,
+                    exdates=block.exdates,
+                    created_at=block.created_at,
+                    updated_at=block.updated_at,
+                )
+            )
+
+    return sorted(expanded, key=lambda x: x.start_at)
+
+
+# NEW ENDPOINT — Explicit occurrence expansion
+@router.get("/professional/availability/occurrences")
+def list_occurrences(
+    user: User = Depends(require_role("professional")),
+    session: Session = Depends(get_session),
+    start: datetime = Query(..., description="Window start (UTC ISO)"),
+    end: datetime = Query(..., description="Window end (UTC ISO)"),
+):
+    if end <= start:
+        raise HTTPException(status_code=400, detail="end must be after start")
+
+    blocks = session.exec(
+        select(Availability).where(Availability.user_id == user.id)
+    ).all()
+
+    results = []
+
+    for block in blocks:
+        for occ_start, occ_end in _generate_occurrences(block, start, end):
+            results.append(
+                {
+                    "id": block.id,
+                    "start_at": occ_start,
+                    "end_at": occ_end,
+                    "status": block.status,
+                    "title": block.title,
+                    "notes": block.notes,
+                    "series_id": block.series_id,
+                }
+            )
+
+    results.sort(key=lambda x: x["start_at"])
+    return results
 
 
 @router.post("/professional/availability", response_model=AvailabilityRead)
@@ -78,19 +202,18 @@ def create_availability(
 ):
     _validate_block(availability_in.start_at, availability_in.end_at, availability_in.status)
 
-    # Basic overlap protection for non-recurring blocks.
-    # If rrule is present, we still prevent overlap for the base block (best-effort).
     if availability_in.status == "busy":
-        if _overlaps_exist(session, user.id, availability_in.start_at, availability_in.end_at):
-            raise HTTPException(status_code=409, detail="Overlaps with an existing busy block")
+        if _conflict_exists(session, user.id, availability_in.start_at, availability_in.end_at):
+            raise HTTPException(status_code=409, detail="Overlaps with existing busy block")
 
-    block = AvailabilityBlock(
+    block = Availability(
         user_id=user.id,
         start_at=availability_in.start_at,
         end_at=availability_in.end_at,
         status=availability_in.status,
         title=availability_in.title,
         notes=availability_in.notes,
+        timezone=availability_in.timezone,
         series_id=availability_in.series_id,
         rrule=availability_in.rrule,
         exdates=availability_in.exdates,
@@ -111,7 +234,7 @@ def update_availability(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
 ):
-    block = session.get(AvailabilityBlock, block_id)
+    block = session.get(Availability, block_id)
     if not block or block.user_id != user.id:
         raise HTTPException(status_code=404, detail="Availability block not found")
 
@@ -121,12 +244,11 @@ def update_availability(
     new_end = data.get("end_at", block.end_at)
     new_status = data.get("status", block.status)
 
-    _validate_block(new_start, new_end, new_status)
+    _validate_block(new_start, new_end, str(new_status))
 
-    # Overlap protection if resulting block is busy
-    if new_status == "busy":
-        if _overlaps_exist(session, user.id, new_start, new_end, exclude_id=block.id):
-            raise HTTPException(status_code=409, detail="Overlaps with an existing busy block")
+    if str(new_status) == "busy":
+        if _conflict_exists(session, user.id, new_start, new_end, exclude_id=block.id):
+            raise HTTPException(status_code=409, detail="Overlaps with existing busy block")
 
     for key, value in data.items():
         setattr(block, key, value)
@@ -145,7 +267,7 @@ def delete_availability(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
 ):
-    block = session.get(AvailabilityBlock, block_id)
+    block = session.get(Availability, block_id)
     if not block or block.user_id != user.id:
         raise HTTPException(status_code=404, detail="Availability block not found")
 

@@ -3,7 +3,7 @@
 from typing import Literal, Optional
 
 from fastapi_users import schemas
-from pydantic import model_validator
+from pydantic import EmailStr, field_validator, model_validator
 
 # Explicitly define allowed roles
 UserRole = Literal["company", "agency", "professional", "admin"]
@@ -106,3 +106,33 @@ class UserUpdate(schemas.BaseUserUpdate):
     day_rate: Optional[float] = None
     hourly_rate: Optional[float] = None
     bio: Optional[str] = None
+
+
+class SubmitImportedReview(schemas.BaseModel):
+    invite_token: str
+
+    reviewer_name: str
+    reviewer_email: EmailStr
+    reviewer_company: Optional[str] = None
+    reviewer_role: Optional[str] = None
+
+    rating: int
+    title: Optional[str] = None
+    comment: str
+
+    # reviewer checkbox (lets you hide later without deleting)
+    is_public: bool = True
+
+    @field_validator("rating")
+    @classmethod
+    def validate_rating(cls, v: int):
+        if v < 1 or v > 5:
+            raise ValueError("rating must be between 1 and 5")
+        return v
+
+    @field_validator("comment")
+    @classmethod
+    def validate_comment(cls, v: str):
+        if not v or len(v.strip()) < 50:
+            raise ValueError("comment must be at least 50 characters")
+        return v.strip()
