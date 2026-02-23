@@ -20,6 +20,29 @@ def require_professional(user: User = Depends(current_user)) -> User:
     return user
 
 
+def _dump_model(obj: Any) -> Dict[str, Any]:
+    # Pydantic v2 / SQLModel
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    # Pydantic v1 fallback
+    if hasattr(obj, "dict"):
+        return obj.dict()
+    # Last resort
+    return dict(obj)
+
+
+def _to_int_rating(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        n = int(value)
+    except Exception:
+        return None
+    if 1 <= n <= 5:
+        return n
+    return None
+
+
 @router.get("/me/preview")
 def get_my_profile_preview(
     user: User = Depends(require_professional),
@@ -41,20 +64,20 @@ def get_my_profile_preview(
         .order_by(Review.verified_at.desc(), Review.created_at.desc())
     ).all()
 
-    ratings = [
-        int(r.rating)
-        for r in reviews
-        if r.rating is not None and isinstance(r.rating, int)
-    ]
+    ratings: List[int] = []
+    for r in reviews:
+        n = _to_int_rating(getattr(r, "rating", None))
+        if n is not None:
+            ratings.append(n)
+
     avg = (sum(ratings) / len(ratings)) if ratings else 0.0
 
-    # Flatten into the shape your frontend expects: profile + stats fields at top level
-    profile = {
+    # Flatten into the shape your frontend expects
+    profile: Dict[str, Any] = {
         "id": user.id,
         "first_name": getattr(user, "first_name", None),
         "last_name": getattr(user, "last_name", None),
         "avatar_url": getattr(user, "avatar_url", None),
-
         # Talent fields (safe even if Talent missing)
         "profession": getattr(talent, "profession", None) if talent else None,
         "location": getattr(talent, "location", None) if talent else None,
@@ -70,7 +93,7 @@ def get_my_profile_preview(
 
     return {
         "profile": profile,
-        "reviews": [r.model_dump() for r in reviews],
+        "reviews": [_dump_model(r) for r in reviews],
         "average_rating": round(avg, 2),
         "review_count": len(ratings),
     }
