@@ -14,7 +14,7 @@ from auth.users import fastapi_users
 from auth.models import User
 from auth.emailer import send_email
 
-from auth.schemas import SubmitImportedReview  # ensure this exists
+from auth.schemas import SubmitImportedReview
 from models.review import Review
 from models.review_invite import ReviewInvite
 from models.review_verification import ReviewVerification
@@ -68,45 +68,6 @@ def send_review_verification_email(to_email: str, verify_url: str) -> None:
     )
 
 
-@router.get("/professional/me/preview")
-def get_my_profile_preview(
-    session: Session = Depends(get_session),
-    user: User = Depends(require_professional),
-) -> Dict[str, Any]:
-    """
-    Returns what a client would see for this professional:
-    - basic user identity fields
-    - verified + public reviews only
-    - rating stats (average + count)
-    """
-    reviews: List[Review] = session.exec(
-        select(Review)
-        .where(
-            Review.professional_id == user.id,
-            Review.status == "verified",
-            Review.is_public == True,  # noqa: E712
-        )
-        .order_by(Review.created_at.desc())
-    ).all()
-
-    ratings = [r.rating for r in reviews if isinstance(getattr(r, "rating", None), int)]
-    avg = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
-
-    return {
-        "user": {
-            "id": user.id,
-            "first_name": getattr(user, "first_name", "") or "",
-            "last_name": getattr(user, "last_name", "") or "",
-            "avatar_url": getattr(user, "avatar_url", None),
-        },
-        "stats": {
-            "review_count": len(ratings),
-            "average_rating": avg,
-        },
-        "reviews": [r.model_dump() for r in reviews],
-    }
-
-
 @router.post("/professional/review-invites")
 def create_review_invite(
     session: Session = Depends(get_session),
@@ -139,7 +100,9 @@ def submit_imported_review(
 ) -> Dict[str, str]:
     token_hash = hash_token(payload.invite_token)
 
-    invite = session.exec(select(ReviewInvite).where(ReviewInvite.token_hash == token_hash)).first()
+    invite = session.exec(
+        select(ReviewInvite).where(ReviewInvite.token_hash == token_hash)
+    ).first()
     if not invite:
         raise HTTPException(status_code=400, detail="INVALID_INVITE")
 
@@ -169,7 +132,6 @@ def submit_imported_review(
     session.commit()
     session.refresh(review)
 
-    # Create verification token (14 days so a 7-day reminder makes sense)
     raw_verify_token = generate_token()
     verification = ReviewVerification(
         review_id=review.id,
@@ -185,7 +147,10 @@ def submit_imported_review(
     session.commit()
 
     verify_url = f"{FRONTEND_BASE_URL}/reviews/verify?token={raw_verify_token}"
-    send_review_verification_email(to_email=payload.reviewer_email, verify_url=verify_url)
+    send_review_verification_email(
+        to_email=payload.reviewer_email,
+        verify_url=verify_url,
+    )
 
     return {"detail": "CHECK_EMAIL_TO_VERIFY"}
 
@@ -198,7 +163,9 @@ def verify_review(
     token_hash = hash_token(token)
 
     verification = session.exec(
-        select(ReviewVerification).where(ReviewVerification.token_hash == token_hash)
+        select(ReviewVerification).where(
+            ReviewVerification.token_hash == token_hash
+        )
     ).first()
     if not verification:
         raise HTTPException(status_code=400, detail="INVALID_TOKEN")
@@ -211,7 +178,9 @@ def verify_review(
     if verification.expires_at < now:
         raise HTTPException(status_code=400, detail="TOKEN_EXPIRED")
 
-    review = session.exec(select(Review).where(Review.id == verification.review_id)).first()
+    review = session.exec(
+        select(Review).where(Review.id == verification.review_id)
+    ).first()
     if not review:
         raise HTTPException(status_code=400, detail="REVIEW_NOT_FOUND")
 
@@ -248,18 +217,22 @@ def send_review_reminders(
 
     sent = 0
     for v in verifications:
-        review = session.exec(select(Review).where(Review.id == v.review_id)).first()
+        review = session.exec(
+            select(Review).where(Review.id == v.review_id)
+        ).first()
         if not review or not getattr(review, "reviewer_email", None):
             continue
 
-        # regenerate token (we only store token_hash)
         raw = generate_token()
         v.token_hash = hash_token(raw)
-        v.expires_at = now + timedelta(days=7)  # extend from reminder
+        v.expires_at = now + timedelta(days=7)
         v.reminded_at = now
 
         verify_url = f"{FRONTEND_BASE_URL}/reviews/verify?token={raw}"
-        send_review_verification_email(to_email=review.reviewer_email, verify_url=verify_url)
+        send_review_verification_email(
+            to_email=review.reviewer_email,
+            verify_url=verify_url,
+        )
 
         session.add(v)
         sent += 1
