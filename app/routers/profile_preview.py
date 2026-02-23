@@ -1,5 +1,6 @@
-from typing import Optional, List, Dict, Any
-from fastapi import APIRouter, Depends
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from auth.users import fastapi_users
@@ -8,47 +9,68 @@ from auth.database import get_session
 
 from models.talent import Talent
 from models.review import Review
-from models.review_verification import ReviewVerification
 
 router = APIRouter(prefix="/professional", tags=["professional"])
 current_user = fastapi_users.current_user(active=True)
 
+
+def require_professional(user: User = Depends(current_user)) -> User:
+    if getattr(user, "role", None) != "professional":
+        raise HTTPException(status_code=403, detail="PROFESSIONAL_ONLY")
+    return user
+
+
 @router.get("/me/preview")
 def get_my_profile_preview(
-    user: User = Depends(current_user),
+    user: User = Depends(require_professional),
     session: Session = Depends(get_session),
 ) -> Dict[str, Any]:
-    # Talent record for this user (adjust if your Talent relation differs)
-    talent = session.exec(select(Talent).where(Talent.user_id == user.id)).first()
+    # Pull Talent (your professional profile table)
+    talent: Optional[Talent] = session.exec(
+        select(Talent).where(Talent.user_id == user.id)
+    ).first()
 
-    # Verified reviews only: verification.used_at IS NOT NULL
-    # Also hide reviews flagged hidden (field name may differ in your model; adjust if needed)
-    q = (
+    # Verified + public reviews only (what clients see)
+    reviews: List[Review] = session.exec(
         select(Review)
-        .join(ReviewVerification, ReviewVerification.review_id == Review.id)
         .where(
-            Review.professional_user_id == user.id,     # adjust if your FK is different
-            ReviewVerification.used_at != None,         # noqa: E711
-            (Review.is_hidden == False)                 # noqa: E712
+            Review.professional_id == user.id,
+            Review.status == "verified",
+            Review.is_public == True,  # noqa: E712
         )
-        .order_by(Review.created_at.desc())
-    )
-    reviews: List[Review] = session.exec(q).all()
+        .order_by(Review.verified_at.desc(), Review.created_at.desc())
+    ).all()
 
-    ratings = [r.rating for r in reviews if isinstance(getattr(r, "rating", None), int)]
-    avg = round(sum(ratings) / len(ratings), 2) if ratings else 0.0
+    ratings = [
+        int(r.rating)
+        for r in reviews
+        if r.rating is not None and isinstance(r.rating, int)
+    ]
+    avg = (sum(ratings) / len(ratings)) if ratings else 0.0
+
+    # Flatten into the shape your frontend expects: profile + stats fields at top level
+    profile = {
+        "id": user.id,
+        "first_name": getattr(user, "first_name", None),
+        "last_name": getattr(user, "last_name", None),
+        "avatar_url": getattr(user, "avatar_url", None),
+
+        # Talent fields (safe even if Talent missing)
+        "profession": getattr(talent, "profession", None) if talent else None,
+        "location": getattr(talent, "location", None) if talent else None,
+        "bio": getattr(talent, "bio", None) if talent else None,
+        "engineering_discipline": getattr(talent, "engineering_discipline", None) if talent else None,
+        "industry": getattr(talent, "industry", None) if talent else None,
+        "ir35_preference": getattr(talent, "ir35_preference", None) if talent else None,
+        "rate_type": getattr(talent, "rate_type", None) if talent else None,
+        "day_rate": getattr(talent, "day_rate", None) if talent else None,
+        "hourly_rate": getattr(talent, "hourly_rate", None) if talent else None,
+        "work_radius_miles": getattr(talent, "work_radius_miles", None) if talent else None,
+    }
 
     return {
-        "user": {
-            "id": user.id,
-            "first_name": getattr(user, "first_name", ""),
-            "last_name": getattr(user, "last_name", ""),
-            "avatar_url": getattr(user, "avatar_url", None),
-        },
-        "talent": (talent.model_dump() if talent else None),
-        "stats": {
-            "review_count": len(ratings),
-            "average_rating": avg,
-        },
+        "profile": profile,
         "reviews": [r.model_dump() for r in reviews],
+        "average_rating": round(avg, 2),
+        "review_count": len(ratings),
     }
