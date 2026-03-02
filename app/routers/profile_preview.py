@@ -77,7 +77,9 @@ def get_my_profile_preview(
         "id": user.id,
         "first_name": getattr(user, "first_name", None),
         "last_name": getattr(user, "last_name", None),
-        "avatar_url": getattr(user, "avatar_url", None),
+        "avatar_url": (
+        getattr(talent, "avatar_url", None) if talent else None
+        ) or getattr(user, "avatar_url", None),
         # Talent fields (safe even if Talent missing)
         "profession": getattr(talent, "profession", None) if talent else None,
         "location": getattr(talent, "location", None) if talent else None,
