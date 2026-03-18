@@ -18,4 +18,5 @@ def get_session() -> Generator[Session, None, None]:
         yield session
 
 def init_db() -> None:
+    print("INIT_DB tables:", sorted(SQLModel.metadata.tables.keys()))
     SQLModel.metadata.create_all(engine)
