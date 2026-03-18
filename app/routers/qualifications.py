@@ -36,6 +36,29 @@ def get_my_qualifications(
         select(Qualification).where(Qualification.talent_id == talent.id)
     ).all()
 
+@router.delete("/professional/qualifications/{qualification_id}", status_code=204)
+def delete_qualification(
+    qualification_id: int,
+    session: Session = Depends(get_session),
+    user: User = Depends(current_user),
+):
+    if getattr(user, "role", None) != "professional":
+        raise HTTPException(status_code=403, detail="PROFESSIONAL_ONLY")
+
+    talent = session.exec(
+        select(Talent).where(Talent.user_id == user.id)
+    ).first()
+
+    if not talent:
+        raise HTTPException(status_code=404, detail="TALENT_PROFILE_NOT_FOUND")
+
+    qualification = session.get(Qualification, qualification_id)
+    if not qualification or qualification.talent_id != talent.id:
+        raise HTTPException(status_code=404, detail="QUALIFICATION_NOT_FOUND")
+
+    session.delete(qualification)
+    session.commit()
+    return None
 
 @router.post("/professional/qualifications", response_model=Qualification)
 def create_qualification(
