@@ -12,6 +12,8 @@ from auth.models import User
 from models.jobpost import JobPost
 from models.talent import Talent
 from models.application import TalentApplication, TalentApplicationRead, TalentApplicationUpdate
+from models.qualification import Qualification
+from models.review import Review
 
 router = APIRouter(tags=["applications"])
 
@@ -136,7 +138,6 @@ def list_applications_for_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # NOTE: This assumes JobPost.company_id stores the company user's id.
     if user.role == "company" and getattr(job, "company_id", None) != user.id:
         raise HTTPException(status_code=403, detail="Not your job")
 
@@ -176,9 +177,6 @@ def list_applications_for_job(
     for a in apps:
         t = talent_map.get(a.talent_id)
 
-        talent_name = _talent_full_name(t) if t else None
-        profession = getattr(t, "profession", None) if t else None
-
         out.append(
             {
                 "application_id": a.id,
@@ -189,30 +187,77 @@ def list_applications_for_job(
                 "updated_at": getattr(a, "updated_at", None),
 
                 "talent_id": a.talent_id,
-
-                # Core display fields
-                "talent_name": talent_name,
-                "talent_profession": profession,
+                "talent_name": _talent_full_name(t) if t else None,
+                "talent_profession": getattr(t, "profession", None) if t else None,
                 "talent_location": getattr(t, "location", None) if t else None,
                 "talent_postcode": getattr(t, "postcode", None) if t else None,
                 "talent_day_rate": getattr(t, "day_rate", None) if t else None,
                 "talent_hourly_rate": getattr(t, "hourly_rate", None) if t else None,
                 "talent_rate_type": getattr(t, "rate_type", None) if t else None,
-
-                # Requested extras
-                "talent_engineering_discipline": (
-                    getattr(t, "engineering_discipline", None)
-                    if (t and _is_engineering_profession(t))
-                    else None
-                ),
-                "talent_industry": getattr(t, "industry", None) if t else None,
-
-                # Avatar (for your applications page card image)
-                "talent_avatar_url": getattr(t, "avatar_url", None) if t else None,
+                "talent_engineering_discipline": getattr(t, "engineering_discipline", None),
+                "talent_industry": getattr(t, "industry", None),
+                "talent_avatar_url": getattr(t, "avatar_url", None),
             }
         )
 
     return out
+
+
+# ===================== COMPANY VIEW PROFESSIONAL PROFILE =====================
+
+@router.get("/company/applications/{application_id}/professional-profile", response_model=dict)
+def company_get_application_professional_profile(
+    application_id: int,
+    user: User = Depends(require_role("company")),
+    session: Session = Depends(get_session),
+):
+    app_obj = session.get(TalentApplication, application_id)
+    if not app_obj:
+        raise HTTPException(status_code=404, detail="APPLICATION_NOT_FOUND")
+
+    job = session.get(JobPost, app_obj.jobpost_id)
+    if not job or getattr(job, "company_id", None) != user.id:
+        raise HTTPException(status_code=403, detail="NOT_ALLOWED")
+
+    talent = session.get(Talent, app_obj.talent_id)
+    if not talent:
+        raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
+
+    qualifications = session.exec(
+        select(Qualification).where(Qualification.talent_id == talent.id)
+    ).all()
+
+    reviews = session.exec(
+        select(Review).where(
+            Review.professional_id == talent.user_id,
+            Review.status == "verified",
+            Review.is_public == True,  # noqa
+        )
+    ).all()
+
+    ratings = [r.rating for r in reviews if r.rating is not None]
+    avg = sum(ratings) / len(ratings) if ratings else 0
+
+    return {
+        "profile": {
+            "first_name": talent.first_name,
+            "last_name": talent.last_name,
+            "avatar_url": talent.avatar_url,
+            "profession": talent.profession,
+            "location": talent.location,
+            "bio": talent.bio,
+            "skills": talent.skills,
+            "engineering_discipline": talent.engineering_discipline,
+            "industry": talent.industry,
+            "day_rate": talent.day_rate,
+            "hourly_rate": talent.hourly_rate,
+            "rate_type": talent.rate_type,
+        },
+        "qualifications": qualifications,
+        "reviews": reviews,
+        "average_rating": avg,
+        "review_count": len(reviews),
+    }
 
 
 # ===================== APPLICATIONS (UPDATE) =====================
