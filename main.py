@@ -20,6 +20,7 @@ from app.routers.uploads import router as uploads_router
 from app.routers.availability import router as availability_router
 from app.routers.reviews import router as reviews_router
 from app.routers.profile_preview import router as profile_preview_router
+from app.routers.qualifications import router as qualifications_router
 
 app = FastAPI(title="Enginuity API")
 
@@ -42,6 +43,8 @@ app.include_router(
     prefix="/auth/jwt",
     tags=["auth"],
 )
+app.include_router(qualifications_router)
+
 app.include_router(
     fastapi_users.get_register_router(UserRead, UserCreate),
     prefix="/auth",
