@@ -20,6 +20,7 @@ class TalentBase(SQLModel):
     avatar_url: Optional[str] = None
     cv_url: Optional[str] = None
     bio: Optional[str] = None
+    skills: Optional[str] = None
 
 
 class Talent(TalentBase, table=True):
@@ -52,6 +53,7 @@ class TalentRead(SQLModel):
     avatar_url: Optional[str] = None
     cv_url: Optional[str] = None
     bio: Optional[str] = None
+    skills: Optional[str] = None
 
     agency_id: Optional[int] = None
     user_id: Optional[int] = None
@@ -75,3 +77,4 @@ class TalentUpdate(SQLModel):
     avatar_url: Optional[str] = None
     cv_url: Optional[str] = None
     bio: Optional[str] = None
+    skills: Optional[str] = None

@@ -84,6 +84,7 @@ def get_my_profile_preview(
         "profession": getattr(talent, "profession", None) if talent else None,
         "location": getattr(talent, "location", None) if talent else None,
         "bio": getattr(talent, "bio", None) if talent else None,
+        "skills": getattr(talent, "skills", None) if talent else None,
         "engineering_discipline": getattr(talent, "engineering_discipline", None) if talent else None,
         "industry": getattr(talent, "industry", None) if talent else None,
         "ir35_preference": getattr(talent, "ir35_preference", None) if talent else None,
