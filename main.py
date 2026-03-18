@@ -21,7 +21,6 @@ from app.routers.availability import router as availability_router
 from app.routers.reviews import router as reviews_router
 from app.routers.profile_preview import router as profile_preview_router
 
-
 app = FastAPI(title="Enginuity API")
 
 app.add_middleware(
@@ -54,7 +53,7 @@ app.include_router(
     tags=["auth"],
 )
 
-# --- Your app routers ---
+# --- App routers ---
 app.include_router(profile_router)
 app.include_router(talent_router)
 app.include_router(companies_router)
@@ -68,9 +67,16 @@ app.include_router(availability_router)
 app.include_router(reviews_router)
 app.include_router(profile_preview_router)
 
+
 @app.on_event("startup")
 def on_startup():
+    print("Running init_db()...")
     init_db()
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 
 @app.get("/")
