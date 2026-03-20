@@ -21,6 +21,7 @@ from app.routers.availability import router as availability_router
 from app.routers.reviews import router as reviews_router
 from app.routers.profile_preview import router as profile_preview_router
 from app.routers.qualifications import router as qualifications_router
+from app.routers.booking_requests import router as booking_requests_router
 
 app = FastAPI(title="ContractPros API")
 
@@ -70,6 +71,7 @@ app.include_router(uploads_router)
 app.include_router(availability_router)
 app.include_router(reviews_router)
 app.include_router(profile_preview_router)
+app.include_router(booking_requests_router)
 
 @app.on_event("startup")
 def on_startup():

@@ -289,6 +289,13 @@ def update_application(
             raise HTTPException(status_code=403, detail="Not allowed")
 
     update_data = application_update.model_dump(exclude_unset=True)
+
+    new_status = update_data.get("status")
+    new_notes = update_data.get("notes", app_obj.notes)
+
+    if new_status == "rejected" and not (new_notes or "").strip():
+    raise HTTPException(status_code=400, detail="REJECTION_REASON_REQUIRED")
+
     update_data["updated_at"] = datetime.utcnow()
 
     for key, value in update_data.items():

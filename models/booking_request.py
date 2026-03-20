@@ -1,20 +1,19 @@
 from typing import Optional
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 
 from sqlmodel import SQLModel, Field
 
 
-class Booking(SQLModel, table=True):
+class BookingRequest(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    booking_request_id: int = Field(index=True)
-
     company_id: int = Field(index=True, nullable=False)
+    talent_id: int = Field(index=True, nullable=False)
+
     jobpost_id: Optional[int] = Field(default=None, foreign_key="jobpost.id", index=True)
     application_id: Optional[int] = Field(default=None, index=True)
-    talent_id: int = Field(foreign_key="talent.id", index=True, nullable=False)
 
-    status: str = Field(default="confirmed", index=True)  # confirmed / completed / cancelled
+    status: str = Field(default="pending", index=True)  # pending / accepted / declined / expired
 
     start_date: date
     end_date: date
@@ -27,14 +26,17 @@ class Booking(SQLModel, table=True):
     contact_phone: str
 
     notes: Optional[str] = None
+    decline_reason: Optional[str] = None
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    requested_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    expires_at: datetime = Field(
+        default_factory=lambda: datetime.utcnow() + timedelta(days=3),
+        index=True,
+    )
+    responded_at: Optional[datetime] = None
 
 
-class BookingCreate(SQLModel):
-    booking_request_id: int
-    company_id: int
+class BookingRequestCreate(SQLModel):
     talent_id: int
     jobpost_id: Optional[int] = None
     application_id: Optional[int] = None
@@ -52,9 +54,12 @@ class BookingCreate(SQLModel):
     notes: Optional[str] = None
 
 
-class BookingRead(SQLModel):
+class BookingRequestRespond(SQLModel):
+    decline_reason: Optional[str] = None
+
+
+class BookingRequestRead(SQLModel):
     id: int
-    booking_request_id: int
     company_id: int
     talent_id: int
     jobpost_id: Optional[int] = None
@@ -73,6 +78,8 @@ class BookingRead(SQLModel):
     contact_phone: str
 
     notes: Optional[str] = None
+    decline_reason: Optional[str] = None
 
-    created_at: datetime
-    updated_at: datetime
+    requested_at: datetime
+    expires_at: datetime
+    responded_at: Optional[datetime] = None
