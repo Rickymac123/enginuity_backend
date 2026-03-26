@@ -288,13 +288,13 @@ def update_application(
         if not talent or talent.user_id != user.id:
             raise HTTPException(status_code=403, detail="Not allowed")
 
-    update_data = application_update.model_dump(exclude_unset=True)
+        update_data = application_update.model_dump(exclude_unset=True)
 
     new_status = update_data.get("status")
     new_notes = update_data.get("notes", app_obj.notes)
 
     if new_status == "rejected" and not (new_notes or "").strip():
-    raise HTTPException(status_code=400, detail="REJECTION_REASON_REQUIRED")
+        raise HTTPException(status_code=400, detail="REJECTION_REASON_REQUIRED")
 
     update_data["updated_at"] = datetime.utcnow()
 
