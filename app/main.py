@@ -23,6 +23,7 @@ from app.routers.profile_preview import router as profile_preview_router
 from app.routers.qualifications import router as qualifications_router
 from app.routers.booking_requests import router as booking_requests_router
 from app.routers.company_matches import router as company_matches_router
+from app.routers.company_talent import router as company_talent_router
 
 app = FastAPI(title="ContractPros API")
 
@@ -74,6 +75,7 @@ app.include_router(reviews_router)
 app.include_router(profile_preview_router)
 app.include_router(booking_requests_router)
 app.include_router(company_matches_router)
+app.include_router(company_talent_router)
 
 @app.on_event("startup")
 def on_startup():
