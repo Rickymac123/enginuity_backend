@@ -13,6 +13,7 @@ from models.review_verification import ReviewVerification  # noqa: F401
 from models.qualification import Qualification  # noqa: F401
 from models.booking_request import BookingRequest  # noqa: F401
 from models.booking import Booking  # noqa: F401
+from models.jobpost import JobPost  # noqa: F401
 # add other SQLModel tables you have (JobPost, Company, etc) as noqa imports too
 
 def get_session() -> Generator[Session, None, None]:
