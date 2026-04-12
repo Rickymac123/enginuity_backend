@@ -22,6 +22,10 @@ class ProfessionalApplyCreate(BaseModel):
     notes: Optional[str] = None
 
 
+def _norm(value: Optional[str]) -> str:
+    return (value or "").strip().lower()
+
+
 def _talent_full_name(t: Talent) -> Optional[str]:
     first = (getattr(t, "first_name", None) or "").strip()
     last = (getattr(t, "last_name", None) or "").strip()
@@ -29,9 +33,136 @@ def _talent_full_name(t: Talent) -> Optional[str]:
     return full or None
 
 
-def _is_engineering_profession(t: Talent) -> bool:
-    prof = (getattr(t, "profession", None) or "").strip().lower()
-    return prof == "engineering"
+def _contains(a: Optional[str], b: Optional[str]) -> bool:
+    aa = _norm(a)
+    bb = _norm(b)
+    if not aa or not bb:
+        return False
+    return aa in bb or bb in aa
+
+
+def _split_csv_or_lines(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    raw = value.replace("\r", "\n")
+    parts: List[str] = []
+    for chunk in raw.split("\n"):
+        for item in chunk.split(","):
+            v = item.strip().lower()
+            if v:
+                parts.append(v)
+    return list(dict.fromkeys(parts))
+
+
+def _rate_match(job: JobPost, talent: Talent) -> bool:
+    job_rate_type = _norm(getattr(job, "rate_type", None))
+    talent_rate_type = _norm(getattr(talent, "rate_type", None))
+
+    if job_rate_type and talent_rate_type and job_rate_type != talent_rate_type:
+        return False
+
+    if job_rate_type == "day":
+        talent_day_rate = getattr(talent, "day_rate", None)
+        job_day_min = getattr(job, "day_rate_min", None)
+        job_day_max = getattr(job, "day_rate_max", None)
+
+        if talent_day_rate is None:
+            return False
+        if job_day_min is not None and talent_day_rate < job_day_min:
+            return False
+        if job_day_max is not None and talent_day_rate > job_day_max:
+            return False
+        return True
+
+    if job_rate_type == "hour":
+        talent_hourly_rate = getattr(talent, "hourly_rate", None)
+        job_hourly_min = getattr(job, "hourly_rate_min", None)
+        job_hourly_max = getattr(job, "hourly_rate_max", None)
+
+        if talent_hourly_rate is None:
+            return False
+        if job_hourly_min is not None and talent_hourly_rate < job_hourly_min:
+            return False
+        if job_hourly_max is not None and talent_hourly_rate > job_hourly_max:
+            return False
+        return True
+
+    return True
+
+
+def _job_talent_match(job: JobPost, talent: Talent, qualifications: List[Qualification]) -> dict:
+    total_weight = 0
+    achieved = 0
+
+    matches: List[str] = []
+    mismatches: List[str] = []
+
+    def check(label: str, condition: bool, weight: int):
+        nonlocal total_weight, achieved
+        total_weight += weight
+        if condition:
+            achieved += weight
+            matches.append(label)
+        else:
+            mismatches.append(label)
+
+    # Hard/important criteria
+    job_profession = _norm(getattr(job, "profession", None))
+    talent_profession = _norm(getattr(talent, "profession", None))
+    check("Profession match", not job_profession or job_profession == talent_profession, 20)
+
+    job_discipline = _norm(getattr(job, "engineering_discipline", None))
+    talent_discipline = _norm(getattr(talent, "engineering_discipline", None))
+    check("Discipline match", not job_discipline or job_discipline == talent_discipline, 25)
+
+    job_industry = _norm(getattr(job, "industry", None))
+    talent_industry = _norm(getattr(talent, "industry", None))
+    check("Industry match", not job_industry or job_industry == talent_industry, 10)
+
+    job_ir35 = _norm(getattr(job, "ir35_type", None))
+    talent_ir35 = _norm(getattr(talent, "ir35_preference", None))
+    ir35_ok = (
+        not job_ir35
+        or not talent_ir35
+        or talent_ir35 == "either"
+        or talent_ir35 == job_ir35
+    )
+    check("IR35 fit", ir35_ok, 10)
+
+    location_ok = (
+        not _norm(getattr(job, "location", None))
+        or _contains(getattr(job, "location", None), getattr(talent, "location", None))
+        or _contains(getattr(job, "postcode", None), getattr(talent, "postcode", None))
+    )
+    check("Location fit", location_ok, 10)
+
+    check("Rate fit", _rate_match(job, talent), 10)
+
+    # Skills
+    required_skills = set(_split_csv_or_lines(getattr(job, "required_skills", None)))
+    talent_skills = set(_split_csv_or_lines(getattr(talent, "skills", None)))
+    skills_ok = not required_skills or required_skills.issubset(talent_skills)
+    check("Required skills match", skills_ok, 10)
+
+    # Qualifications
+    required_qualifications = set(
+        _split_csv_or_lines(getattr(job, "required_qualifications", None))
+    )
+    talent_qualification_names = {
+        _norm(getattr(q, "name", None)) for q in qualifications if getattr(q, "name", None)
+    }
+    quals_ok = not required_qualifications or required_qualifications.issubset(
+        talent_qualification_names
+    )
+    check("Required qualifications match", quals_ok, 5)
+
+    percentage = round((achieved / total_weight) * 100) if total_weight > 0 else 0
+
+    return {
+        "match_percentage": percentage,
+        "match_reasons": matches,
+        "mismatch_reasons": mismatches,
+    }
 
 
 # ===================== APPLICATIONS (PROFESSIONAL APPLY) =====================
@@ -54,7 +185,10 @@ def professional_apply_to_job(
         )
     ).first()
     if not talent:
-        raise HTTPException(status_code=404, detail="Professional profile not completed, please complete your profile before applying")
+        raise HTTPException(
+            status_code=404,
+            detail="Professional profile not completed, please complete your profile before applying",
+        )
 
     existing = session.exec(
         select(TalentApplication).where(
@@ -121,6 +255,7 @@ def professional_list_my_applications(
                 "job_profession": getattr(j, "profession", None) if j else None,
                 "job_day_rate_min": getattr(j, "day_rate_min", None) if j else None,
                 "job_day_rate_max": getattr(j, "day_rate_max", None) if j else None,
+                "company_id": getattr(j, "company_id", None) if j else None,
             }
         )
     return out
@@ -173,9 +308,22 @@ def list_applications_for_job(
     talents = session.exec(select(Talent).where(Talent.id.in_(talent_ids))).all()
     talent_map = {t.id: t for t in talents}
 
+    qualifications = session.exec(
+        select(Qualification).where(Qualification.talent_id.in_(talent_ids))
+    ).all()
+    qualifications_map: dict[int, List[Qualification]] = {}
+    for q in qualifications:
+        qualifications_map.setdefault(q.talent_id, []).append(q)
+
     out: List[dict] = []
     for a in apps:
         t = talent_map.get(a.talent_id)
+        t_quals = qualifications_map.get(a.talent_id, [])
+        match_info = _job_talent_match(job, t, t_quals) if t else {
+            "match_percentage": 0,
+            "match_reasons": [],
+            "mismatch_reasons": [],
+        }
 
         out.append(
             {
@@ -194,12 +342,17 @@ def list_applications_for_job(
                 "talent_day_rate": getattr(t, "day_rate", None) if t else None,
                 "talent_hourly_rate": getattr(t, "hourly_rate", None) if t else None,
                 "talent_rate_type": getattr(t, "rate_type", None) if t else None,
-                "talent_engineering_discipline": getattr(t, "engineering_discipline", None),
-                "talent_industry": getattr(t, "industry", None),
-                "talent_avatar_url": getattr(t, "avatar_url", None),
+                "talent_engineering_discipline": getattr(t, "engineering_discipline", None) if t else None,
+                "talent_industry": getattr(t, "industry", None) if t else None,
+                "talent_avatar_url": getattr(t, "avatar_url", None) if t else None,
+
+                "match_percentage": match_info["match_percentage"],
+                "match_reasons": match_info["match_reasons"],
+                "mismatch_reasons": match_info["mismatch_reasons"],
             }
         )
 
+    out.sort(key=lambda x: x["match_percentage"], reverse=True)
     return out
 
 
@@ -231,7 +384,7 @@ def company_get_application_professional_profile(
         select(Review).where(
             Review.professional_id == talent.user_id,
             Review.status == "verified",
-            Review.is_public == True,  # noqa
+            Review.is_public == True,  # noqa: E712
         )
     ).all()
 
@@ -288,7 +441,7 @@ def update_application(
         if not talent or talent.user_id != user.id:
             raise HTTPException(status_code=403, detail="Not allowed")
 
-        update_data = application_update.model_dump(exclude_unset=True)
+    update_data = application_update.model_dump(exclude_unset=True)
 
     new_status = update_data.get("status")
     new_notes = update_data.get("notes", app_obj.notes)
