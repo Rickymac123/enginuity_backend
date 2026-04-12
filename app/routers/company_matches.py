@@ -28,7 +28,6 @@ def _contains(a: Optional[str], b: Optional[str]) -> bool:
 def _rate_fits(job: JobPost, talent: Talent) -> bool:
     rate_type = _norm(getattr(talent, "rate_type", None))
     day_rate = getattr(talent, "day_rate", None)
-    hourly_rate = getattr(talent, "hourly_rate", None)
 
     job_day_min = getattr(job, "day_rate_min", None)
     job_day_max = getattr(job, "day_rate_max", None)
@@ -42,60 +41,75 @@ def _rate_fits(job: JobPost, talent: Talent) -> bool:
     return True
 
 
+def _profession_matches(job: JobPost, talent: Talent) -> bool:
+    job_profession = _norm(getattr(job, "profession", None))
+    talent_profession = _norm(getattr(talent, "profession", None))
+
+    if not job_profession:
+        return True
+
+    return job_profession == talent_profession
+
+
+def _discipline_matches(job: JobPost, talent: Talent) -> bool:
+    job_discipline = _norm(getattr(job, "engineering_discipline", None))
+    talent_discipline = _norm(getattr(talent, "engineering_discipline", None))
+
+    if not job_discipline:
+        return True
+
+    return job_discipline == talent_discipline
+
+
 def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
     score = 0
     reasons: List[str] = []
 
-    job_profession = getattr(job, "profession", None)
-    talent_profession = getattr(talent, "profession", None)
-    if _norm(job_profession) and _norm(job_profession) == _norm(talent_profession):
-        score += 30
-        reasons.append("Profession match")
+    if _profession_matches(job, talent):
+        if _norm(getattr(job, "profession", None)):
+            score += 40
+            reasons.append("Profession match")
 
-    job_discipline = getattr(job, "engineering_discipline", None)
-    talent_discipline = getattr(talent, "engineering_discipline", None)
-    if _norm(job_discipline) and _norm(job_discipline) == _norm(talent_discipline):
-        score += 20
-        reasons.append("Discipline match")
+    if _discipline_matches(job, talent):
+        if _norm(getattr(job, "engineering_discipline", None)):
+            score += 30
+            reasons.append("Discipline match")
 
     job_industry = getattr(job, "industry", None)
     talent_industry = getattr(talent, "industry", None)
     if _norm(job_industry) and _norm(job_industry) == _norm(talent_industry):
-        score += 15
+        score += 10
         reasons.append("Industry match")
 
     job_ir35 = getattr(job, "ir35_type", None) or getattr(job, "ir35_preference", None)
     talent_ir35 = getattr(talent, "ir35_preference", None)
     if _norm(job_ir35) and _norm(talent_ir35):
         if _norm(talent_ir35) == "either" or _norm(job_ir35) == _norm(talent_ir35):
-            score += 10
+            score += 5
             reasons.append("IR35 fit")
 
     job_location = getattr(job, "location", None)
     talent_location = getattr(talent, "location", None)
     if _contains(job_location, talent_location):
-        score += 10
+        score += 5
         reasons.append("Location overlap")
 
     job_postcode = getattr(job, "postcode", None)
     talent_postcode = getattr(talent, "postcode", None)
     if _contains(job_postcode, talent_postcode):
-        score += 10
+        score += 5
         reasons.append("Postcode overlap")
 
     if _rate_fits(job, talent):
-        score += 5
+        score += 3
         reasons.append("Rate fit")
 
-    if getattr(talent, "avatar_url", None):
-        score += 1
-
     if getattr(talent, "cv_url", None):
-        score += 2
+        score += 1
         reasons.append("CV uploaded")
 
     if getattr(talent, "bio", None):
-        score += 2
+        score += 1
 
     return score, reasons
 
@@ -129,6 +143,13 @@ def get_company_job_matches(
     results: List[dict] = []
 
     for talent in talents:
+        # Hard filters first
+        if not _profession_matches(job, talent):
+            continue
+
+        if not _discipline_matches(job, talent):
+            continue
+
         score, reasons = _score_match(job, talent)
 
         if score <= 0:
