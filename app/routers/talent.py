@@ -1,4 +1,5 @@
 from typing import List, Optional
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
@@ -21,6 +22,12 @@ def _get_my_talent(session: Session, user: User) -> Optional[Talent]:
     ).first()
 
 
+def _contains_if_present(statement, field, value: Optional[str]):
+    if value and value.strip():
+        return statement.where(field.contains(value.strip()))
+    return statement
+
+
 # ===================== TALENT (AGENCY) =====================
 
 @router.post("/talent/", response_model=TalentRead)
@@ -31,7 +38,6 @@ def create_talent(
 ):
     data = talent_in.model_dump()
 
-    # Hard-lock ownership
     data.pop("agency_id", None)
     data.pop("user_id", None)
     data.pop("id", None)
@@ -48,9 +54,19 @@ def list_talent(
     user: User = Depends(require_role("agency")),
     session: Session = Depends(get_session),
     location: Optional[str] = None,
+    postcode: Optional[str] = None,
+    profession_category: Optional[str] = None,
     profession: Optional[str] = None,
+    engineering_discipline: Optional[str] = None,
+    industry: Optional[str] = None,
+    experience_level: Optional[str] = None,
+    ir35_preference: Optional[str] = None,
+    rate_type: Optional[str] = None,
     min_day_rate: Optional[float] = None,
     max_day_rate: Optional[float] = None,
+    min_hourly_rate: Optional[float] = None,
+    max_hourly_rate: Optional[float] = None,
+    q: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ):
@@ -59,16 +75,36 @@ def list_talent(
         Talent.user_id == None,  # noqa: E711
     )
 
-    if location:
-        statement = statement.where(Talent.location.contains(location))
-    if profession:
-        statement = statement.where(Talent.profession.contains(profession))
+    statement = _contains_if_present(statement, Talent.location, location)
+    statement = _contains_if_present(statement, Talent.postcode, postcode)
+    statement = _contains_if_present(statement, Talent.profession_category, profession_category)
+    statement = _contains_if_present(statement, Talent.profession, profession)
+    statement = _contains_if_present(statement, Talent.engineering_discipline, engineering_discipline)
+    statement = _contains_if_present(statement, Talent.industry, industry)
+    statement = _contains_if_present(statement, Talent.experience_level, experience_level)
+    statement = _contains_if_present(statement, Talent.ir35_preference, ir35_preference)
+    statement = _contains_if_present(statement, Talent.rate_type, rate_type)
+
+    if q and q.strip():
+        qv = q.strip()
+        statement = statement.where(
+            Talent.first_name.contains(qv)
+            | Talent.last_name.contains(qv)
+            | Talent.bio.contains(qv)
+            | Talent.skills.contains(qv)
+        )
+
     if min_day_rate is not None:
         statement = statement.where(Talent.day_rate >= min_day_rate)
     if max_day_rate is not None:
         statement = statement.where(Talent.day_rate <= max_day_rate)
 
-    statement = statement.offset(offset).limit(limit)
+    if min_hourly_rate is not None:
+        statement = statement.where(Talent.hourly_rate >= min_hourly_rate)
+    if max_hourly_rate is not None:
+        statement = statement.where(Talent.hourly_rate <= max_hourly_rate)
+
+    statement = statement.order_by(Talent.created_at.desc()).offset(offset).limit(limit)
     return session.exec(statement).all()
 
 
@@ -105,9 +141,10 @@ def update_talent(
 
     update_data = talent_update.model_dump(exclude_unset=True)
 
-    # Never allow ownership / identity changes
     for k in ("id", "agency_id", "user_id", "created_at", "updated_at"):
         update_data.pop(k, None)
+
+    update_data["updated_at"] = datetime.utcnow()
 
     for key, value in update_data.items():
         setattr(db_talent, key, value)
@@ -145,14 +182,12 @@ def create_my_talent(
     user: User = Depends(require_role("professional")),
     session: Session = Depends(get_session),
 ):
-    # Idempotent: if it already exists, just return it.
     existing = _get_my_talent(session, user)
     if existing:
         return existing
 
     data = talent_in.model_dump()
 
-    # Hard-lock ownership
     data.pop("agency_id", None)
     data.pop("user_id", None)
     data.pop("id", None)
@@ -171,8 +206,6 @@ def get_my_talent(
 ):
     talent = _get_my_talent(session, user)
     if not talent:
-        # Use a machine-friendly code so the frontend can show a nice CTA
-        # (e.g. "Complete your profile to apply for jobs")
         raise HTTPException(status_code=404, detail="TALENT_PROFILE_NOT_FOUND")
     return talent
 
@@ -189,9 +222,10 @@ def update_my_talent(
 
     update_data = payload.model_dump(exclude_unset=True)
 
-    # Never allow ownership / identity changes
     for k in ("id", "agency_id", "user_id", "created_at", "updated_at"):
         update_data.pop(k, None)
+
+    update_data["updated_at"] = datetime.utcnow()
 
     for key, value in update_data.items():
         setattr(talent, key, value)
