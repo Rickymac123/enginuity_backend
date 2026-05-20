@@ -25,20 +25,34 @@ def _contains(a: Optional[str], b: Optional[str]) -> bool:
     return aa in bb or bb in aa
 
 
-def _rate_fits(job: JobPost, talent: Talent) -> bool:
-    rate_type = _norm(getattr(talent, "rate_type", None))
-    day_rate = getattr(talent, "day_rate", None)
+def _split_lines(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    parts = []
+    for line in value.replace("\r", "\n").split("\n"):
+        item = line.strip().lower()
+        if item:
+            parts.append(item)
+    return list(dict.fromkeys(parts))
 
-    job_day_min = getattr(job, "day_rate_min", None)
-    job_day_max = getattr(job, "day_rate_max", None)
 
-    if rate_type == "day" and day_rate is not None:
-        if job_day_min is not None and day_rate < job_day_min:
-            return False
-        if job_day_max is not None and day_rate > job_day_max:
-            return False
+def _location_matches(job: JobPost, talent: Talent) -> bool:
+    job_location = getattr(job, "location", None)
+    talent_location = getattr(talent, "location", None)
 
-    return True
+    job_postcode = getattr(job, "postcode", None)
+    talent_postcode = getattr(talent, "postcode", None)
+
+    return _contains(job_location, talent_location) or _contains(job_postcode, talent_postcode)
+
+
+def _profession_category_matches(job: JobPost, talent: Talent) -> bool:
+    job_category = _norm(getattr(job, "profession_category", None))
+    talent_category = _norm(getattr(talent, "profession_category", None))
+
+    if not job_category:
+        return True
+    return job_category == talent_category
 
 
 def _profession_matches(job: JobPost, talent: Talent) -> bool:
@@ -47,7 +61,6 @@ def _profession_matches(job: JobPost, talent: Talent) -> bool:
 
     if not job_profession:
         return True
-
     return job_profession == talent_profession
 
 
@@ -58,51 +71,157 @@ def _discipline_matches(job: JobPost, talent: Talent) -> bool:
     if not job_discipline:
         return True
 
-    return job_discipline == talent_discipline
+    if job_discipline == talent_discipline:
+        return True
+
+    if talent_discipline == "multi-skilled" and job_discipline in {"electrical", "mechanical"}:
+        return True
+
+    return False
+
+
+def _industry_matches(job: JobPost, talent: Talent) -> bool:
+    job_industry = _norm(getattr(job, "industry", None))
+    talent_industry = _norm(getattr(talent, "industry", None))
+
+    if not job_industry:
+        return True
+    return job_industry == talent_industry
+
+
+def _experience_matches(job: JobPost, talent: Talent) -> bool:
+    job_level = _norm(getattr(job, "experience_level", None))
+    talent_level = _norm(getattr(talent, "experience_level", None))
+
+    if not job_level or not talent_level:
+        return True
+
+    ranking = {
+        "junior": 1,
+        "mid-level": 2,
+        "senior": 3,
+        "lead": 4,
+        "manager": 5,
+    }
+
+    j = ranking.get(job_level)
+    t = ranking.get(talent_level)
+
+    if j is None or t is None:
+        return job_level == talent_level
+
+    return t >= j
+
+
+def _ir35_matches(job: JobPost, talent: Talent) -> bool:
+    job_ir35 = _norm(getattr(job, "ir35_type", None) or getattr(job, "ir35_preference", None))
+    talent_ir35 = _norm(getattr(talent, "ir35_preference", None))
+
+    if not job_ir35 or not talent_ir35:
+        return True
+
+    return talent_ir35 == "either" or talent_ir35 == job_ir35
+
+
+def _rate_fits(job: JobPost, talent: Talent) -> bool:
+    job_rate_type = _norm(getattr(job, "rate_type", None))
+    talent_rate_type = _norm(getattr(talent, "rate_type", None))
+
+    if job_rate_type and talent_rate_type and job_rate_type != talent_rate_type:
+        return False
+
+    if job_rate_type == "day":
+        talent_day_rate = getattr(talent, "day_rate", None)
+        job_day_min = getattr(job, "day_rate_min", None)
+        job_day_max = getattr(job, "day_rate_max", None)
+
+        if talent_day_rate is None:
+            return False
+        if job_day_min is not None and talent_day_rate < job_day_min:
+            return False
+        if job_day_max is not None and talent_day_rate > job_day_max:
+            return False
+
+    elif job_rate_type == "hour":
+        talent_hourly_rate = getattr(talent, "hourly_rate", None)
+        job_hourly_min = getattr(job, "hourly_rate_min", None)
+        job_hourly_max = getattr(job, "hourly_rate_max", None)
+
+        if talent_hourly_rate is None:
+            return False
+        if job_hourly_min is not None and talent_hourly_rate < job_hourly_min:
+            return False
+        if job_hourly_max is not None and talent_hourly_rate > job_hourly_max:
+            return False
+
+    return True
+
+
+def _travel_flags_match(job: JobPost, talent: Talent) -> bool:
+    if getattr(job, "requires_travel", False) and not getattr(talent, "willing_to_travel", False):
+        return False
+    if getattr(job, "requires_vehicle", False) and not getattr(talent, "has_vehicle", False):
+        return False
+    if getattr(job, "requires_own_tools", False) and not getattr(talent, "has_tools", False):
+        return False
+    return True
 
 
 def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
     score = 0
     reasons: List[str] = []
 
-    if _profession_matches(job, talent):
-        if _norm(getattr(job, "profession", None)):
-            score += 40
-            reasons.append("Profession match")
+    if _profession_category_matches(job, talent) and _norm(getattr(job, "profession_category", None)):
+        score += 10
+        reasons.append("Category match")
 
-    if _discipline_matches(job, talent):
-        if _norm(getattr(job, "engineering_discipline", None)):
-            score += 30
-            reasons.append("Discipline match")
+    if _profession_matches(job, talent) and _norm(getattr(job, "profession", None)):
+        score += 20
+        reasons.append("Profession match")
 
-    job_industry = getattr(job, "industry", None)
-    talent_industry = getattr(talent, "industry", None)
-    if _norm(job_industry) and _norm(job_industry) == _norm(talent_industry):
+    if _discipline_matches(job, talent) and _norm(getattr(job, "engineering_discipline", None)):
+        score += 30
+        reasons.append("Discipline match")
+
+    if _industry_matches(job, talent) and _norm(getattr(job, "industry", None)):
         score += 10
         reasons.append("Industry match")
 
-    job_ir35 = getattr(job, "ir35_type", None) or getattr(job, "ir35_preference", None)
-    talent_ir35 = getattr(talent, "ir35_preference", None)
-    if _norm(job_ir35) and _norm(talent_ir35):
-        if _norm(talent_ir35) == "either" or _norm(job_ir35) == _norm(talent_ir35):
-            score += 5
-            reasons.append("IR35 fit")
+    if _experience_matches(job, talent) and _norm(getattr(job, "experience_level", None)):
+        score += 8
+        reasons.append("Experience level fit")
 
-    job_location = getattr(job, "location", None)
-    talent_location = getattr(talent, "location", None)
-    if _contains(job_location, talent_location):
+    if _ir35_matches(job, talent) and _norm(getattr(job, "ir35_type", None)):
+        score += 5
+        reasons.append("IR35 fit")
+
+    if _location_matches(job, talent):
         score += 5
         reasons.append("Location overlap")
 
-    job_postcode = getattr(job, "postcode", None)
-    talent_postcode = getattr(talent, "postcode", None)
-    if _contains(job_postcode, talent_postcode):
-        score += 5
-        reasons.append("Postcode overlap")
-
     if _rate_fits(job, talent):
-        score += 3
+        score += 8
         reasons.append("Rate fit")
+
+    if getattr(job, "requires_travel", False) and getattr(talent, "willing_to_travel", False):
+        score += 1
+        reasons.append("Travel ready")
+
+    if getattr(job, "requires_vehicle", False) and getattr(talent, "has_vehicle", False):
+        score += 1
+        reasons.append("Has vehicle")
+
+    if getattr(job, "requires_own_tools", False) and getattr(talent, "has_tools", False):
+        score += 1
+        reasons.append("Has own tools")
+
+    job_required_skills = set(_split_lines(getattr(job, "required_skills", None)))
+    talent_skills = set(_split_lines(getattr(talent, "skills", None)))
+    if job_required_skills and talent_skills:
+        overlap = job_required_skills.intersection(talent_skills)
+        if overlap:
+            score += min(len(overlap) * 2, 8)
+            reasons.append(f"{len(overlap)} required skill match")
 
     if getattr(talent, "cv_url", None):
         score += 1
@@ -144,10 +263,16 @@ def get_company_job_matches(
 
     for talent in talents:
         # Hard filters first
+        if not _profession_category_matches(job, talent):
+            continue
+
         if not _profession_matches(job, talent):
             continue
 
         if not _discipline_matches(job, talent):
+            continue
+
+        if not _travel_flags_match(job, talent):
             continue
 
         score, reasons = _score_match(job, talent)
@@ -159,11 +284,13 @@ def get_company_job_matches(
             {
                 "talent_id": talent.id,
                 "score": score,
-                "match_reasons": reasons[:4],
+                "match_reasons": reasons[:5],
                 "talent_name": _full_name(talent),
+                "talent_profession_category": getattr(talent, "profession_category", None),
                 "talent_profession": getattr(talent, "profession", None),
                 "talent_engineering_discipline": getattr(talent, "engineering_discipline", None),
                 "talent_industry": getattr(talent, "industry", None),
+                "talent_experience_level": getattr(talent, "experience_level", None),
                 "talent_location": getattr(talent, "location", None),
                 "talent_postcode": getattr(talent, "postcode", None),
                 "talent_ir35_preference": getattr(talent, "ir35_preference", None),
@@ -171,6 +298,9 @@ def get_company_job_matches(
                 "talent_day_rate": getattr(talent, "day_rate", None),
                 "talent_hourly_rate": getattr(talent, "hourly_rate", None),
                 "talent_work_radius_miles": getattr(talent, "work_radius_miles", None),
+                "talent_willing_to_travel": getattr(talent, "willing_to_travel", None),
+                "talent_has_vehicle": getattr(talent, "has_vehicle", None),
+                "talent_has_tools": getattr(talent, "has_tools", None),
                 "talent_avatar_url": getattr(talent, "avatar_url", None),
                 "talent_bio": getattr(talent, "bio", None),
                 "talent_cv_url": getattr(talent, "cv_url", None),
