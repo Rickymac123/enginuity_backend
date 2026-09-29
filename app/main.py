@@ -25,7 +25,10 @@ from app.routers.booking_requests import router as booking_requests_router
 from app.routers.company_matches import router as company_matches_router
 from app.routers.company_talent import router as company_talent_router
 
+from app.routers.social_auth import router as social_auth_router
+
 app = FastAPI(title="ContractPros API")
+app.include_router(social_auth_router)
 
 app.add_middleware(
     CORSMiddleware,

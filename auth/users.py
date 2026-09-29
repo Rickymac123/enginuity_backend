@@ -21,6 +21,7 @@ from fastapi_users_db_sqlmodel import SQLModelUserDatabase
 from auth.database import get_session
 from auth.emailer import send_email
 from auth.models import User
+from auth.registration import create_account
 
 from models.talent import Talent  # NEW
 
@@ -63,71 +64,21 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
     verification_token_secret = VERIFY_SECRET
     reset_password_token_secret = RESET_SECRET
 
-    async def on_after_register(
-        self,
-        user: User,
-        request: Optional[Request] = None,
-    ) -> None:
-        print(f"✅ User registered: id={user.id} email={user.email}")
-
-        # --- NEW: auto-create Talent profile when role == professional ---
+    async def create(self, user_create, safe=False, request=None):
+        await self.validate_password(user_create.password, user_create)
+        session = self.user_db.session
         try:
-            if getattr(user, "role", None) == "professional":
-                session: Session = self.user_db.session  # SQLModelUserDatabase session
+            user = create_account(session, user_create,
+                                  self.password_helper.hash(user_create.password))
+            session.commit()
+            session.refresh(user)
+        except Exception:
+            session.rollback()
+            raise
+        await self.on_after_register(user, request)
+        return user
 
-                # Prevent duplicate Talent rows for same user
-                existing = session.exec(
-                    select(Talent).where(
-                        Talent.user_id == user.id,
-                        Talent.agency_id == None,  # noqa: E711
-                    )
-                ).first()
-
-                if not existing:
-                    payload = {}
-                    if request is not None:
-                        try:
-                            payload = await request.json()
-                        except Exception:
-                            payload = {}
-
-                    # Prefer payload (signup form) then fall back to user fields
-                    first_name = (payload.get("first_name") or getattr(user, "first_name", "") or "").strip()
-                    last_name = (payload.get("last_name") or getattr(user, "last_name", "") or "").strip()
-                    profession = (payload.get("profession") or "").strip()
-                    location = (payload.get("location") or "").strip()
-
-                    # If your frontend doesn’t send profession/location yet, this will still create
-                    # a minimally-valid record only if you relax DB constraints.
-                    # With your schema validator, profession/location should be present for professionals.
-                    talent = Talent(
-                        user_id=user.id,
-                        agency_id=None,
-                        first_name=first_name,
-                        last_name=last_name,
-                        profession=profession,
-                        location=location,
-                        postcode=payload.get("postcode"),
-                        work_radius_miles=payload.get("work_radius_miles"),
-                        ir35_preference=payload.get("ir35_preference"),
-                        engineering_discipline=payload.get("engineering_discipline"),
-                        industry=payload.get("industry"),
-                        rate_type=payload.get("rate_type"),
-                        day_rate=payload.get("day_rate"),
-                        hourly_rate=payload.get("hourly_rate"),
-                        bio=payload.get("bio"),
-                        avatar_url=payload.get("avatar_url") or getattr(user, "avatar_url", None),
-                    )
-
-                    session.add(talent)
-                    session.commit()
-                    session.refresh(talent)
-                    print(f"✅ Talent profile created: talent_id={talent.id} for user_id={user.id}")
-        except Exception as e:
-            # Don't block registration if Talent creation fails
-            print(f"❌ Failed to auto-create Talent profile for user_id={user.id}: {e}")
-
-        # Trigger verify email on signup
+    async def on_after_register(self, user, request=None):
         await self.request_verify(user, request)
 
     async def on_after_request_verify(
@@ -139,7 +90,7 @@ class UserManager(IntegerIDMixin, BaseUserManager[User, int]):
         # Frontend page should POST token to backend: POST /auth/verify { "token": "..." }
         verify_link = f"{FRONTEND_BASE_URL}/verify?token={quote(token)}"
 
-        subject = "Verify your email for Conotract Pro's UK"
+        subject = "Verify your email for ContractPros"
         html = f"""
         <div style="font-family:Arial,sans-serif;line-height:1.5">
           <h2>Verify your email</h2>
