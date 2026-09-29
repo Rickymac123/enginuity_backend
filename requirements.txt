@@ -18,3 +18,4 @@ fastapi-users[sqlalchemy]
 fastapi-users-db-sqlmodel
 python-dateutil
 requests>=2.31.0
+PyJWT[crypto]>=2.10,<3

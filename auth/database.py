@@ -6,6 +6,7 @@ from app.db import engine  # <- single source of truth
 
 # IMPORTANT: ensure models are imported so SQLModel registers tables
 from auth.models import User  # noqa: F401
+from models.social_auth import SocialIdentity, SocialFlow, RegistrationEmail  # noqa: F401
 from models.profile import UserProfile  # noqa: F401
 from models.review import Review  # noqa: F401
 from models.review_invite import ReviewInvite  # noqa: F401

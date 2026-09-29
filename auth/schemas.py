@@ -3,7 +3,7 @@
 from typing import Literal, Optional
 
 from fastapi_users import schemas
-from pydantic import EmailStr, field_validator, model_validator
+from pydantic import EmailStr, Field, field_validator, model_validator
 
 # Explicitly define allowed roles
 UserRole = Literal["company", "agency", "professional", "admin"]
@@ -41,6 +41,25 @@ class UserRead(schemas.BaseUser[int]):
 
 
 class UserCreate(schemas.BaseUserCreate):
+    password: str = Field(min_length=12, max_length=128)
+    profession_category: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_signup_privileges(cls, values):
+        if isinstance(values, dict) and {"is_active", "is_superuser", "is_verified"}.intersection(values):
+            raise ValueError("Account permissions cannot be set during signup")
+        return values
+
+    @field_validator("first_name", "last_name", "phone", "address_line1", "city", "postcode", "country")
+    @classmethod
+    def required_details(cls, value):
+        if not value or not value.strip():
+            raise ValueError("This field is required")
+        if len(value) > 200:
+            raise ValueError("This field is too long")
+        return value.strip()
+
     # default stays safe; frontend will explicitly send role
     role: RegistrationRole = "company"
 
