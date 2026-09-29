@@ -9,6 +9,7 @@ from auth.database import get_session
 
 from models.talent import Talent
 from models.review import Review
+from models.public_review import public_review
 
 router = APIRouter(prefix="/professional", tags=["professional"])
 current_user = fastapi_users.current_user(active=True)
@@ -18,17 +19,6 @@ def require_professional(user: User = Depends(current_user)) -> User:
     if getattr(user, "role", None) != "professional":
         raise HTTPException(status_code=403, detail="PROFESSIONAL_ONLY")
     return user
-
-
-def _dump_model(obj: Any) -> Dict[str, Any]:
-    # Pydantic v2 / SQLModel
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    # Pydantic v1 fallback
-    if hasattr(obj, "dict"):
-        return obj.dict()
-    # Last resort
-    return dict(obj)
 
 
 def _to_int_rating(value: Any) -> Optional[int]:
@@ -96,7 +86,7 @@ def get_my_profile_preview(
 
     return {
         "profile": profile,
-        "reviews": [_dump_model(r) for r in reviews],
+        "reviews": [public_review(r) for r in reviews],
         "average_rating": round(avg, 2),
         "review_count": len(ratings),
     }
