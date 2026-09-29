@@ -7,6 +7,7 @@ from pydantic import EmailStr, field_validator, model_validator
 
 # Explicitly define allowed roles
 UserRole = Literal["company", "agency", "professional", "admin"]
+RegistrationRole = Literal["company", "agency", "professional"]
 
 
 class UserRead(schemas.BaseUser[int]):
@@ -41,7 +42,7 @@ class UserRead(schemas.BaseUser[int]):
 
 class UserCreate(schemas.BaseUserCreate):
     # default stays safe; frontend will explicitly send role
-    role: UserRole = "company"
+    role: RegistrationRole = "company"
 
     first_name: str
     last_name: str
@@ -80,7 +81,13 @@ class UserCreate(schemas.BaseUserCreate):
 
 class UserUpdate(schemas.BaseUserUpdate):
     email: Optional[str] = None
-    role: Optional[UserRole] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_privilege_changes(cls, values):
+        if isinstance(values, dict) and {"role", "is_active", "is_superuser", "is_verified"}.intersection(values):
+            raise ValueError("Account permissions must be changed through administration")
+        return values
 
     first_name: Optional[str] = None
     last_name: Optional[str] = None

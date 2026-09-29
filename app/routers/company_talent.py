@@ -10,6 +10,7 @@ from auth.models import User
 from models.talent import Talent
 from models.qualification import Qualification
 from models.review import Review
+from models.public_review import public_review
 
 router = APIRouter(tags=["company_talent"])
 
@@ -17,7 +18,7 @@ router = APIRouter(tags=["company_talent"])
 def _review_public_and_verified(review: Review) -> bool:
     status = (getattr(review, "status", None) or "").strip().lower()
     is_public = getattr(review, "is_public", True)
-    return is_public and (not status or status == "verified")
+    return is_public is True and status == "verified"
 
 
 @router.get("/company/talent/{talent_id}/profile", response_model=dict)
@@ -35,8 +36,8 @@ def get_company_talent_profile(
     ).all()
 
     reviews = session.exec(
-        select(Review).where(Review.talent_id == talent.id)
-    ).all()
+        select(Review).where(Review.professional_id == talent.user_id)
+    ).all() if talent.user_id is not None else []
 
     visible_reviews: List[Review] = [r for r in reviews if _review_public_and_verified(r)]
 
@@ -67,7 +68,7 @@ def get_company_talent_profile(
     return {
         "profile": profile,
         "qualifications": qualifications,
-        "reviews": visible_reviews,
+        "reviews": [public_review(r) for r in visible_reviews],
         "average_rating": round(avg_rating, 1) if visible_reviews else 0.0,
         "review_count": len(visible_reviews),
     }
