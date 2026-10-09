@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import os
 import secrets
+from auth.settings import signing_secret
 import time
 from typing import Any, Literal
 from urllib.parse import urlencode, urlparse
@@ -37,7 +38,7 @@ def config(provider):
     parsed = urlparse(origin)
     if parsed.scheme != 'https' or not parsed.netloc or parsed.path or parsed.query or parsed.fragment:
         raise HTTPException(503, 'SOCIAL_NOT_CONFIGURED')
-    if len(os.getenv('SECRET', '')) < 32:
+    if len(signing_secret()) < 32:
         raise HTTPException(503, 'SOCIAL_NOT_CONFIGURED')
     client_id = os.getenv(f'{provider.upper()}_CLIENT_ID', '')
     required = ['APPLE_TEAM_ID', 'APPLE_KEY_ID', 'APPLE_PRIVATE_KEY'] if provider == 'apple' else [f'{provider.upper()}_CLIENT_SECRET']

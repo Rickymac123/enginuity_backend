@@ -27,7 +27,9 @@ from models.talent import Talent  # NEW
 
 
 # IMPORTANT: set these in env (Codespaces secrets / .env)
-SECRET = os.getenv("SECRET", "SUPER_SECRET_JWT")
+from auth.settings import signing_secret
+
+SECRET = signing_secret()
 VERIFY_SECRET = os.getenv("VERIFY_SECRET", SECRET)
 RESET_SECRET = os.getenv("RESET_SECRET", SECRET)
 

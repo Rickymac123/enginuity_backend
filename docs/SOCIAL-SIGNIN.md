@@ -4,6 +4,7 @@
 
 FRONTEND_BASE_URL=https://www.contractpros.co.uk
 SECRET=<existing strong application signing secret, at least 32 characters>
+Alternatively, SECRET_KEY is supported for existing Render configuration. SECRET takes precedence. Missing, blank or the old public fallback key prevents startup. Correcting a previously ignored key invalidates sessions and verification links signed with the fallback; sign in again and request a new verification email.
 
 Google:
 - GOOGLE_CLIENT_ID
