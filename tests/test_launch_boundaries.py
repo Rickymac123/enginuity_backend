@@ -20,8 +20,8 @@ def test_registration_rejects_privileged_or_unknown_role(role):
 
 def registration(role):
     return dict(email='person@example.com', password='test-password-123', role=role,
-                first_name='Test', last_name='Person', phone='', address_line1='',
-                address_line2='', city='', postcode='', country='UK',
+                first_name='Test', last_name='Person', phone='07000000000', address_line1='1 Test Street',
+                address_line2='', city='Cardiff', postcode='CF10 1AA', country='UK',
                 profession='Engineer', location='Cardiff')
 
 
