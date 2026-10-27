@@ -12,7 +12,7 @@ from models.review import Review
 from models.public_review import public_review
 
 router = APIRouter(prefix="/professional", tags=["professional"])
-current_user = fastapi_users.current_user(active=True)
+current_user = fastapi_users.current_user(active=True, verified=True)
 
 
 def require_professional(user: User = Depends(current_user)) -> User:

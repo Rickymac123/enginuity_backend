@@ -1,8 +1,8 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Body
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, model_validator
 from sqlmodel import Session, select
 
 from app.db import get_session
@@ -19,11 +19,19 @@ router = APIRouter(tags=["admin"])
 
 
 class AdminUserUpdate(BaseModel):
-    email: Optional[str] = None
-    role: Optional[str] = None
+    email: Optional[EmailStr] = None
+    role: Optional[Literal["company", "professional", "agency", "admin"]] = None
     is_active: Optional[bool] = None
     is_superuser: Optional[bool] = None
     is_verified: Optional[bool] = None
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_null_permissions(cls, values):
+        if any(value is None for value in values.values()):
+            raise ValueError("Account fields cannot be null")
+        return values
 
 
 class AdminJobUpdate(BaseModel):

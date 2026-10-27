@@ -24,7 +24,7 @@ router = APIRouter(tags=["reviews"])
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
 REMINDER_JOB_SECRET = os.getenv("REMINDER_JOB_SECRET", "")
 
-current_active_user = fastapi_users.current_user(active=True)
+current_active_user = fastapi_users.current_user(active=True, verified=True)
 
 
 def utcnow() -> datetime:
@@ -101,7 +101,7 @@ def submit_imported_review(
     token_hash = hash_token(payload.invite_token)
 
     invite = session.exec(
-        select(ReviewInvite).where(ReviewInvite.token_hash == token_hash)
+        select(ReviewInvite).where(ReviewInvite.token_hash == token_hash).with_for_update()
     ).first()
     if not invite:
         raise HTTPException(status_code=400, detail="INVALID_INVITE")
@@ -129,7 +129,7 @@ def submit_imported_review(
     )
 
     session.add(review)
-    session.commit()
+    session.flush()
     session.refresh(review)
 
     raw_verify_token = generate_token()
@@ -177,7 +177,7 @@ def verify_review(
     verification = session.exec(
         select(ReviewVerification).where(
             ReviewVerification.token_hash == token_hash
-        )
+        ).with_for_update()
     ).first()
     if not verification:
         raise HTTPException(status_code=400, detail="INVALID_TOKEN")
@@ -238,9 +238,6 @@ def send_review_reminders(
             continue
 
         raw = generate_token()
-        v.token_hash = hash_token(raw)
-        v.expires_at = now + timedelta(days=7)
-        v.reminded_at = now
 
         verify_url = f"{FRONTEND_BASE_URL}/reviews/verify?token={raw}"
 
@@ -249,6 +246,9 @@ def send_review_reminders(
                 to_email=review.reviewer_email,
                 verify_url=verify_url,
             )
+            v.token_hash = hash_token(raw)
+            v.expires_at = now + timedelta(days=7)
+            v.reminded_at = now
             sent += 1
         except Exception as e:
             failed += 1
@@ -257,4 +257,6 @@ def send_review_reminders(
         session.add(v)
 
     session.commit()
-    return {"sent": sent, "failed": failed, "candidates": len(verifications)}
+    from app.notifications import deliver_pending
+    notifications = deliver_pending(session)
+    return {"sent": sent + notifications["sent"], "failed": failed + notifications["failed"], "candidates": len(verifications), "notifications": notifications}
