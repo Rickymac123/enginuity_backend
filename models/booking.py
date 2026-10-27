@@ -7,7 +7,7 @@ from sqlmodel import SQLModel, Field
 class Booking(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    booking_request_id: int = Field(index=True)
+    booking_request_id: int = Field(index=True, unique=True)
 
     company_id: int = Field(index=True, nullable=False)
     jobpost_id: Optional[int] = Field(default=None, foreign_key="jobpost.id", index=True)

@@ -12,7 +12,7 @@ def main() -> int:
     r = requests.post(url, headers={"X-Job-Secret": secret}, timeout=20)
     print("status:", r.status_code)
     print("body:", r.text)
-    return 0 if r.ok else 1
+    return 0 if r.ok and r.json().get("failed", 0) == 0 else 1
 
 if __name__ == "__main__":
     raise SystemExit(main())

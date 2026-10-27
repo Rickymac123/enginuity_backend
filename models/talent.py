@@ -34,6 +34,7 @@ class TalentBase(SQLModel):
 
 
 class Talent(TalentBase, table=True):
+    cv_storage_key: Optional[str] = None
     id: Optional[int] = Field(default=None, primary_key=True)
     agency_id: Optional[int] = Field(default=None, index=True)
     user_id: Optional[int] = Field(default=None, index=True)

@@ -1,0 +1,33 @@
+name: Launch checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test-only
+          POSTGRES_DB: contractpros_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U test -d contractpros_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      SECRET: isolated-ci-key-not-for-production-xxxxxxxxxxxxxxxx
+      DATABASE_URL: sqlite://
+      CONTRACTPROS_POSTGRES_TESTS: '1'
+      TEST_POSTGRES_URL: postgresql+psycopg://test:test-only@127.0.0.1:5432/contractpros_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q
