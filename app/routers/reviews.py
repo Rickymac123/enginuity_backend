@@ -238,9 +238,6 @@ def send_review_reminders(
             continue
 
         raw = generate_token()
-        v.token_hash = hash_token(raw)
-        v.expires_at = now + timedelta(days=7)
-        v.reminded_at = now
 
         verify_url = f"{FRONTEND_BASE_URL}/reviews/verify?token={raw}"
 
@@ -249,6 +246,9 @@ def send_review_reminders(
                 to_email=review.reviewer_email,
                 verify_url=verify_url,
             )
+            v.token_hash = hash_token(raw)
+            v.expires_at = now + timedelta(days=14)
+            v.reminded_at = now
             sent += 1
         except Exception as e:
             failed += 1
