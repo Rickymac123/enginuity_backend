@@ -94,3 +94,6 @@ def cancel_confirmed_booking(request_id: int, payload: CancellationInput,
     session.commit()
     session.refresh(booking)
     return booking
+
+from app.routers.booking_reviews import router as booking_reviews_router
+router.include_router(booking_reviews_router)

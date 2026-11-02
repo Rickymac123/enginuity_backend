@@ -12,6 +12,8 @@ class Review(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
+    booking_id: Optional[int] = Field(default=None, foreign_key="booking.id", unique=True, index=True)
+
     professional_id: int = Field(foreign_key="user.id", index=True)
     company_id: Optional[int] = Field(default=None, foreign_key="user.id", index=True)
 
