@@ -1,6 +1,7 @@
 # models/company.py
 
 from typing import Optional
+from datetime import datetime
 from sqlmodel import SQLModel, Field
 
 class CompanyUpdate(SQLModel):
@@ -14,12 +15,16 @@ class CompanyUpdate(SQLModel):
 
 class CompanyBase(SQLModel):
     name: str
+    industry: Optional[str] = None
+    postcode: Optional[str] = None
+    logo_url: Optional[str] = None
     location: Optional[str] = None
     website: Optional[str] = None
     description: Optional[str] = None
 
 
 class Company(CompanyBase, table=True):
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
     id: Optional[int] = Field(default=None, primary_key=True)
 
     # The user that owns this company profile (role="company")

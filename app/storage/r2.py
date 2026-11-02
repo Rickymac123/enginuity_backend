@@ -15,3 +15,9 @@ def bucket_name() -> str:
 
 def public_base_url() -> str:
     return os.environ["R2_PUBLIC_BASE_URL"].rstrip("/")
+
+def private_bucket_name() -> str:
+    name = os.getenv("R2_PRIVATE_BUCKET_NAME")
+    if not name or name == os.getenv("R2_BUCKET_NAME"):
+        raise RuntimeError("Configure a separate private bucket with public access disabled for CVs")
+    return name

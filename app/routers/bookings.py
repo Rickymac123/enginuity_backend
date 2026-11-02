@@ -20,25 +20,7 @@ def create_booking(
     user: User = Depends(current_user),
     session: Session = Depends(get_session),
 ):
-    job = session.get(JobPost, booking_in.jobpost_id)
-    if not job or job.company_id != user.id:
-        raise HTTPException(status_code=404, detail="Job not found or not yours")
-
-    talent = session.get(Talent, booking_in.talent_id)
-    if not talent:
-        raise HTTPException(status_code=404, detail="Talent not found")
-
-    booking = Booking(
-        jobpost_id=booking_in.jobpost_id,
-        talent_id=booking_in.talent_id,
-        start_date=booking_in.start_date,
-        end_date=booking_in.end_date,
-    )
-
-    session.add(booking)
-    session.commit()
-    session.refresh(booking)
-    return booking
+    raise HTTPException(status_code=410, detail="Use booking requests; professionals must accept before a booking is confirmed")
 
 
 @router.get("/bookings/", response_model=List[Booking])
@@ -46,8 +28,12 @@ def list_bookings(
     user: User = Depends(current_user),
     session: Session = Depends(get_session),
 ):
-    job_ids = session.exec(select(JobPost.id).where(JobPost.company_id == user.id)).all()
-    if not job_ids:
-        return []
-    statement = select(Booking).where(Booking.jobpost_id.in_(job_ids))
-    return session.exec(statement).all()
+    if user.role == "company":
+        return session.exec(select(Booking).where(Booking.company_id == user.id)).all()
+    if user.role == "professional":
+        talent_ids = session.exec(select(Talent.id).where(Talent.user_id == user.id)).all()
+    elif user.role == "agency":
+        talent_ids = session.exec(select(Talent.id).where(Talent.agency_id == user.id)).all()
+    else:
+        raise HTTPException(status_code=403, detail="NOT_ALLOWED")
+    return session.exec(select(Booking).where(Booking.talent_id.in_(talent_ids))).all() if talent_ids else []

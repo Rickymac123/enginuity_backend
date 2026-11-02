@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.db import get_session
+from app.notifications import enqueue
 from auth.deps import require_role
 from auth.models import User
 
@@ -14,12 +15,14 @@ from models.talent import Talent
 from models.application import TalentApplication, TalentApplicationRead, TalentApplicationUpdate
 from models.qualification import Qualification
 from models.review import Review
+from models.public_review import public_review
 
 router = APIRouter(tags=["applications"])
 
 
 class ProfessionalApplyCreate(BaseModel):
     notes: Optional[str] = None
+    talent_id: Optional[int] = None
 
 
 def _norm(value: Optional[str]) -> str:
@@ -171,19 +174,29 @@ def _job_talent_match(job: JobPost, talent: Talent, qualifications: List[Qualifi
 def professional_apply_to_job(
     job_id: int,
     payload: ProfessionalApplyCreate = Body(...),
-    user: User = Depends(require_role("professional")),
+    user: User = Depends(require_role("professional", "agency")),
     session: Session = Depends(get_session),
 ):
-    job = session.get(JobPost, job_id)
+    job = session.exec(select(JobPost).where(JobPost.id == job_id).with_for_update()).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        )
-    ).first()
+    if job.is_archived:
+        raise HTTPException(status_code=409, detail="JOB_CLOSED")
+
+    if user.role == "agency":
+        if not payload.talent_id:
+            raise HTTPException(status_code=422, detail="Select a professional to submit")
+        talent = session.exec(select(Talent).where(
+            Talent.id == payload.talent_id, Talent.agency_id == user.id,
+            Talent.user_id == None,  # noqa: E711
+        )).first()
+        if not talent:
+            raise HTTPException(status_code=404, detail="Agency professional not found")
+    else:
+        talent = session.exec(select(Talent).where(
+            Talent.user_id == user.id, Talent.agency_id == None,  # noqa: E711
+        )).first()
     if not talent:
         raise HTTPException(
             status_code=404,
@@ -206,6 +219,9 @@ def professional_apply_to_job(
         notes=payload.notes,
     )
     session.add(app_obj)
+    session.flush()
+    enqueue(session, f"application:{app_obj.id}", job.company_id, "New job application",
+        "A professional has applied for your job. Sign in to review the application.", f"/dashboard/company/jobs/{job.id}/applications")
     session.commit()
     session.refresh(app_obj)
     return app_obj
@@ -261,6 +277,24 @@ def professional_list_my_applications(
     return out
 
 
+@router.get("/agency/applications", response_model=List[dict])
+def agency_list_applications(
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+):
+    rows = session.exec(
+        select(TalentApplication, Talent, JobPost)
+        .join(Talent, Talent.id == TalentApplication.talent_id)
+        .join(JobPost, JobPost.id == TalentApplication.jobpost_id)
+        .where(Talent.agency_id == user.id, Talent.user_id == None)  # noqa: E711
+        .order_by(TalentApplication.id.desc())
+    ).all()
+    return [{"application_id": a.id, "talent_id": t.id,
+             "talent_name": _talent_full_name(t), "jobpost_id": j.id,
+             "job_title": j.title, "status": a.status, "notes": a.notes}
+            for a, t, j in rows]
+
+
 # ===================== APPLICATIONS (VIEW JOB APPLICATIONS) =====================
 
 @router.get("/jobs/{job_id}/applications", response_model=List[dict])
@@ -269,7 +303,7 @@ def list_applications_for_job(
     user: User = Depends(require_role("company", "agency", "professional")),
     session: Session = Depends(get_session),
 ):
-    job = session.get(JobPost, job_id)
+    job = session.exec(select(JobPost).where(JobPost.id == job_id).with_for_update()).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -388,6 +422,9 @@ def company_get_application_professional_profile(
         )
     ).all()
 
+    if talent.user_id is None:
+        reviews = []
+
     ratings = [r.rating for r in reviews if r.rating is not None]
     avg = sum(ratings) / len(ratings) if ratings else 0
 
@@ -407,7 +444,7 @@ def company_get_application_professional_profile(
             "rate_type": talent.rate_type,
         },
         "qualifications": qualifications,
-        "reviews": reviews,
+        "reviews": [public_review(review) for review in reviews],
         "average_rating": avg,
         "review_count": len(reviews),
     }
@@ -422,7 +459,7 @@ def update_application(
     user: User = Depends(require_role("company", "agency", "professional")),
     session: Session = Depends(get_session),
 ):
-    app_obj = session.get(TalentApplication, application_id)
+    app_obj = session.exec(select(TalentApplication).where(TalentApplication.id == application_id).with_for_update()).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found")
 
@@ -444,6 +481,10 @@ def update_application(
     update_data = application_update.model_dump(exclude_unset=True)
 
     new_status = update_data.get("status")
+    allowed = {"company": {"shortlisted", "accepted", "rejected"}, "professional": {"withdrawn"}, "agency": {"withdrawn"}}
+    if new_status is not None and new_status != app_obj.status:
+        if new_status not in allowed[user.role] or app_obj.status in {"rejected", "withdrawn", "accepted"}:
+            raise HTTPException(status_code=409, detail="INVALID_APPLICATION_TRANSITION")
     new_notes = update_data.get("notes", app_obj.notes)
 
     if new_status == "rejected" and not (new_notes or "").strip():
@@ -455,6 +496,12 @@ def update_application(
         setattr(app_obj, key, value)
 
     session.add(app_obj)
+    if new_status and user.role == "company":
+        applicant = session.get(Talent, app_obj.talent_id)
+        recipient = applicant.user_id or applicant.agency_id if applicant else None
+        role = "professional" if applicant and applicant.user_id else "agency"
+        enqueue(session, f"application-status:{app_obj.id}:{new_status}", recipient, "Your application has an update",
+            "A company has updated your application. Sign in to view the response.", f"/dashboard/{role}")
     session.commit()
     session.refresh(app_obj)
     return app_obj

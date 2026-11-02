@@ -26,7 +26,7 @@ def _contains_if_present(statement, field, value: Optional[str]):
 @router.post("/jobs/", response_model=JobPost)
 def create_job(
     job: JobPostCreate,
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
 ):
     job_post = JobPost(**job.model_dump(), company_id=user.id)
@@ -38,7 +38,7 @@ def create_job(
 
 @router.get("/jobs/", response_model=List[JobPost])
 def list_jobs(
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
     location: Optional[str] = None,
     postcode: Optional[str] = None,
@@ -92,7 +92,7 @@ def list_jobs(
 
 @router.get("/jobs/archived", response_model=List[JobPost])
 def list_archived_jobs(
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
     limit: int = 50,
     offset: int = 0,
@@ -113,7 +113,7 @@ def list_archived_jobs(
 @router.get("/jobs/{job_id}", response_model=JobPost)
 def get_job(
     job_id: int,
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
 ):
     job = session.get(JobPost, job_id)
@@ -126,7 +126,7 @@ def get_job(
 def update_job(
     job_id: int,
     job_update: JobPostUpdate,
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
 ):
     db_job = session.get(JobPost, job_id)
@@ -148,7 +148,7 @@ def update_job(
 @router.delete("/jobs/{job_id}", status_code=204)
 def delete_job(
     job_id: int,
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
 ):
     job = session.get(JobPost, job_id)
@@ -167,7 +167,7 @@ def delete_job(
 @router.post("/jobs/{job_id}/restore", response_model=JobPost)
 def restore_job(
     job_id: int,
-    user: User = Depends(current_user),
+    user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
 ):
     job = session.get(JobPost, job_id)

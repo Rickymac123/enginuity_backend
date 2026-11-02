@@ -8,10 +8,11 @@ from models.qualification import Qualification
 from models.talent import Talent
 from auth.users import fastapi_users
 from auth.models import User
+from auth.deps import require_admin
 
 router = APIRouter(tags=["qualifications"])
 
-current_user = fastapi_users.current_user(active=True)
+current_user = fastapi_users.current_user(active=True, verified=True)
 
 
 class QualificationCreate(BaseModel):
@@ -83,6 +84,32 @@ def create_qualification(
         credential_ref=payload.credential_ref.strip() if payload.credential_ref else None,
     )
 
+    session.add(qualification)
+    session.commit()
+    session.refresh(qualification)
+    return qualification
+
+class VerificationUpdate(BaseModel):
+    is_verified: bool
+
+
+@router.get('/admin/qualifications', response_model=List[Qualification])
+def admin_qualifications(user: User = Depends(require_admin),
+                         session: Session = Depends(get_session)):
+    return session.exec(select(Qualification).order_by(Qualification.created_at.desc())).all()
+
+
+@router.patch('/admin/qualifications/{qualification_id}', response_model=Qualification)
+def verify_qualification(qualification_id: int, payload: VerificationUpdate,
+                         user: User = Depends(require_admin),
+                         session: Session = Depends(get_session)):
+    from datetime import datetime
+    qualification = session.get(Qualification, qualification_id)
+    if not qualification:
+        raise HTTPException(status_code=404, detail='QUALIFICATION_NOT_FOUND')
+    qualification.is_verified = payload.is_verified
+    qualification.verified_by_user_id = user.id if payload.is_verified else None
+    qualification.verified_at = datetime.utcnow() if payload.is_verified else None
     session.add(qualification)
     session.commit()
     session.refresh(qualification)

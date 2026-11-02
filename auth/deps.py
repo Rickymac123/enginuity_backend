@@ -5,7 +5,7 @@ from .models import User
 from .users import fastapi_users
 
 # Base dependency: "give me the currently authenticated user or 401"
-current_user = fastapi_users.current_user()
+current_user = fastapi_users.current_user(active=True, verified=True)
 
 # Central place for role names (prevents typos across the app)
 ROLE_COMPANY = "company"

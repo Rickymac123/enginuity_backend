@@ -1,4 +1,8 @@
 from typing import List, Optional
+from datetime import datetime, time, timedelta
+from models.booking import Booking
+from models.qualification import Qualification
+from app.routers.availability import _conflict_exists
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
@@ -233,6 +237,19 @@ def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
     return score, reasons
 
 
+def _available_for_job(session, job, talent):
+    if not job.start_date or not job.end_date:
+        return True
+    if job.end_date < job.start_date or (job.end_date - job.start_date).days > 366:
+        return False
+    existing = session.exec(select(Booking).where(Booking.talent_id == talent.id,
+        Booking.status != "cancelled", Booking.start_date <= job.end_date, Booking.end_date >= job.start_date)).first()
+    if existing:
+        return False
+    return not talent.user_id or not _conflict_exists(session, talent.user_id,
+        datetime.combine(job.start_date, time.min), datetime.combine(job.end_date + timedelta(days=1), time.min))
+
+
 def _full_name(talent: Talent) -> str:
     first = (getattr(talent, "first_name", None) or "").strip()
     last = (getattr(talent, "last_name", None) or "").strip()
@@ -253,6 +270,9 @@ def get_company_job_matches(
     if getattr(job, "company_id", None) != user.id:
         raise HTTPException(status_code=403, detail="NOT_YOUR_JOB")
 
+    if job.is_archived:
+        raise HTTPException(status_code=409, detail="JOB_CLOSED")
+
     talents = session.exec(
         select(Talent).where(
             Talent.agency_id == None,  # noqa: E711
@@ -262,6 +282,15 @@ def get_company_job_matches(
     results: List[dict] = []
 
     for talent in talents:
+        owner = session.get(User, talent.user_id) if talent.user_id else None
+        if not owner or not owner.is_active or not owner.is_verified:
+            continue
+        if not _available_for_job(session, job, talent):
+            continue
+        required = set(_split_lines((job.required_qualifications or "").replace(",", "\n")))
+        qualifications = session.exec(select(Qualification).where(Qualification.talent_id == talent.id)).all()
+        if required and not required.issubset({_norm(q.name) for q in qualifications}):
+            continue
         if not _profession_category_matches(job, talent):
             continue
 

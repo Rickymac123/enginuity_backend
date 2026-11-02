@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -28,11 +29,45 @@ from app.routers.company_talent import router as company_talent_router
 from app.routers.social_auth import router as social_auth_router
 
 app = FastAPI(title="ContractPros API")
+
+@app.middleware("http")
+async def limit_public_requests(request, call_next):
+    from starlette.responses import JSONResponse
+    from starlette.concurrency import run_in_threadpool
+    from sqlmodel import Session
+    from app.db import engine
+    from app.rate_limits import consume
+    from urllib.parse import parse_qs
+    protected = request.url.path.startswith(("/auth/", "/public/reviews/")) and request.method == "POST"
+    if protected:
+        # Count the actual upstream connection, not an untrusted forwarded IP header.
+        client = request.client.host if request.client else "unknown"
+        def network_limit():
+            with Session(engine) as session:
+                return consume(session, f"network:{client}", 300)
+        if not await run_in_threadpool(network_limit):
+            return JSONResponse({"detail":"RATE_LIMITED"}, status_code=429, headers={"Retry-After":"300"})
+        if request.url.path in {"/auth/jwt/login", "/auth/forgot-password", "/auth/request-verify-token"}:
+            try:
+                if "application/json" in request.headers.get("content-type", ""):
+                    identity = (await request.json()).get("email", "")
+                else:
+                    identity = parse_qs((await request.body()).decode()).get("username", [""])[0]
+                if isinstance(identity, str) and identity:
+                    def identity_limit():
+                        with Session(engine) as session:
+                            return consume(session, f"{request.url.path}:{identity.strip().lower()}", 10)
+                    if not await run_in_threadpool(identity_limit):
+                        return JSONResponse({"detail":"RATE_LIMITED"}, status_code=429, headers={"Retry-After":"300"})
+            except (ValueError, UnicodeError, AttributeError):
+                pass
+    return await call_next(request)
+
 app.include_router(social_auth_router)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "https://www.contractpros.co.uk,https://contractpros.co.uk").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,7 +80,7 @@ app.include_router(
     tags=["users"],
 )
 app.include_router(
-    fastapi_users.get_auth_router(auth_backend),
+    fastapi_users.get_auth_router(auth_backend, requires_verification=True),
     prefix="/auth/jwt",
     tags=["auth"],
 )
@@ -54,6 +89,8 @@ app.include_router(
     prefix="/auth",
     tags=["auth"],
 )
+
+app.include_router(fastapi_users.get_reset_password_router(), prefix="/auth", tags=["auth"])
 
 app.include_router(qualifications_router)
 

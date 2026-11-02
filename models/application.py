@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlmodel import SQLModel, Field
+from sqlalchemy import UniqueConstraint
 
 
 class TalentApplicationBase(SQLModel):
@@ -14,6 +15,7 @@ class TalentApplicationBase(SQLModel):
 
 
 class TalentApplication(TalentApplicationBase, table=True):
+    __table_args__ = (UniqueConstraint("jobpost_id", "talent_id", name="uq_job_talent_application"),)
     id: Optional[int] = Field(default=None, primary_key=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)

@@ -93,3 +93,8 @@ def test_agency_profile_does_not_receive_unrelated_reviews(profile_client):
 
 def test_missing_profile_returns_404(profile_client):
     assert profile_client.get('/company/talent/999/profile').status_code == 404
+
+
+def test_preview_uses_saved_professional_name(profile_client):
+    profile = profile_client.get('/professional/me/preview').json()['profile']
+    assert (profile['first_name'], profile['last_name']) == ('Pro', 'One')

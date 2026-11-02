@@ -12,7 +12,7 @@ def test_reminder_query_and_failed_delivery_retry(monkeypatch):
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(reviews, "REMINDER_JOB_SECRET", "local-test")
     with Session(engine) as session:
-        assert reviews.send_review_reminders(session, "local-test") == {"sent": 0, "failed": 0, "candidates": 0}
+        assert {k:v for k,v in reviews.send_review_reminders(session, "local-test").items() if k != "notifications"} == {"sent": 0, "failed": 0, "candidates": 0}
         now = datetime.utcnow()
         review = Review(professional_id=1, reviewer_name="Test", reviewer_email="test@example.com", rating=5, comment="Test", status="pending", source="imported")
         session.add(review); session.commit(); session.refresh(review)
@@ -20,7 +20,7 @@ def test_reminder_query_and_failed_delivery_retry(monkeypatch):
         session.add(verification); session.commit()
         def fail(**kwargs): raise RuntimeError("simulated mail failure")
         monkeypatch.setattr(reviews, "send_review_verification_email", fail)
-        assert reviews.send_review_reminders(session, "local-test") == {"sent": 0, "failed": 1, "candidates": 1}
+        assert {k:v for k,v in reviews.send_review_reminders(session, "local-test").items() if k != "notifications"} == {"sent": 0, "failed": 1, "candidates": 1}
         session.refresh(verification)
         assert verification.token_hash == "original" and verification.reminded_at is None
         delivered = []
@@ -28,6 +28,7 @@ def test_reminder_query_and_failed_delivery_retry(monkeypatch):
         assert reviews.send_review_reminders(session, "local-test")["sent"] == 1
         session.refresh(verification)
         assert verification.token_hash != "original" and verification.reminded_at is not None
+        assert verification.expires_at - verification.reminded_at == timedelta(days=14)
         assert reviews.send_review_reminders(session, "local-test")["candidates"] == 0
         assert len(delivered) == 1
     engine.dispose()

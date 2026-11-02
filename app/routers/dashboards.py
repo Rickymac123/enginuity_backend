@@ -9,6 +9,7 @@ from auth.deps import require_role
 from auth.models import User
 
 from models.booking import Booking
+from models.booking_request import BookingRequest
 from models.jobpost import JobPost
 from models.talent import Talent
 from models.application import TalentApplication
@@ -26,6 +27,7 @@ class CompanyDashboard(BaseModel):
     total_jobs: int
     total_applications: int
     total_bookings: int
+    total_booking_requests: int
     applications_by_status: Dict[str, int]
 
 
@@ -67,7 +69,6 @@ def get_company_dashboard(
     jobs = session.exec(
         select(JobPost).where(
             JobPost.company_id == user.id,
-            JobPost.is_archived == False,  # noqa: E712
         )
     ).all()
     job_ids = [j.id for j in jobs]
@@ -78,19 +79,17 @@ def get_company_dashboard(
         else []
     )
 
-    bookings = (
-        session.exec(select(Booking).where(Booking.jobpost_id.in_(job_ids))).all()
-        if job_ids
-        else []
-    )
+    bookings = session.exec(select(Booking).where(Booking.company_id == user.id, Booking.status != "cancelled")).all()
+    requests = session.exec(select(BookingRequest).where(BookingRequest.company_id == user.id)).all()
 
     status_counts: Dict[str, int] = {}
     for app_obj in applications:
         status_counts[app_obj.status] = status_counts.get(app_obj.status, 0) + 1
 
     return CompanyDashboard(
-        total_jobs=len(jobs),
+        total_jobs=sum(not job.is_archived for job in jobs),
         total_applications=len(applications),
         total_bookings=len(bookings),
+        total_booking_requests=len(requests),
         applications_by_status=status_counts,
     )
