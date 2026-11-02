@@ -3,6 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from app.db import get_session
 from auth.deps import current_user, require_role
@@ -17,7 +18,7 @@ router = APIRouter(tags=["jobs"])
 
 def _contains_if_present(statement, field, value: Optional[str]):
     if value and value.strip():
-        return statement.where(field.contains(value.strip()))
+        return statement.where(func.lower(field).contains(value.strip().lower(), autoescape=True))
     return statement
 
 
@@ -73,7 +74,7 @@ def list_jobs(
     if q and q.strip():
         qv = q.strip()
         statement = statement.where(
-            JobPost.title.contains(qv) | JobPost.description.contains(qv)
+            func.lower(JobPost.title).contains(qv.lower(), autoescape=True) | func.lower(JobPost.description).contains(qv.lower(), autoescape=True) | func.lower(JobPost.location).contains(qv.lower(), autoescape=True) | func.lower(JobPost.postcode).contains(qv.lower(), autoescape=True) | func.lower(JobPost.profession).contains(qv.lower(), autoescape=True)
         )
 
     if min_day_rate is not None:
@@ -220,7 +221,7 @@ def search_jobs(
     if q and q.strip():
         qv = q.strip()
         statement = statement.where(
-            JobPost.title.contains(qv) | JobPost.description.contains(qv)
+            func.lower(JobPost.title).contains(qv.lower(), autoescape=True) | func.lower(JobPost.description).contains(qv.lower(), autoescape=True) | func.lower(JobPost.location).contains(qv.lower(), autoescape=True) | func.lower(JobPost.postcode).contains(qv.lower(), autoescape=True) | func.lower(JobPost.profession).contains(qv.lower(), autoescape=True)
         )
 
     if min_day_rate is not None:

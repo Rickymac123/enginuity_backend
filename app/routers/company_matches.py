@@ -1,4 +1,5 @@
 from typing import List, Optional
+import re
 from datetime import datetime, time, timedelta
 from models.booking import Booking
 from models.qualification import Qualification
@@ -33,13 +34,7 @@ def _split_lines(value: Optional[str]) -> List[str]:
     if not value:
         return []
 
-    parts: List[str] = []
-    for line in value.replace("\r", "\n").split("\n"):
-        item = line.strip().lower()
-        if item:
-            parts.append(item)
-
-    return list(dict.fromkeys(parts))
+    return list(dict.fromkeys(part.strip().lower() for part in re.split(r"[,;\r\n]+", value) if part.strip()))
 
 
 def _profession_category_matches(job: JobPost, talent: Talent) -> bool:
@@ -92,8 +87,10 @@ def _experience_matches(job: JobPost, talent: Talent) -> bool:
     job_value = _norm(getattr(job, "experience_level", None))
     talent_value = _norm(getattr(talent, "experience_level", None))
 
-    if not job_value or not talent_value:
+    if not job_value:
         return True
+    if not talent_value:
+        return False
 
     ranking = {
         "junior": 1,
@@ -123,10 +120,11 @@ def _ir35_matches(job: JobPost, talent: Talent) -> bool:
     job_value = _norm(getattr(job, "ir35_type", None) or getattr(job, "ir35_preference", None))
     talent_value = _norm(getattr(talent, "ir35_preference", None))
 
-    if not job_value or not talent_value:
+    if not job_value:
         return True
-
-    return talent_value == "either" or talent_value == job_value
+    if not talent_value:
+        return False
+    return job_value == "either" or talent_value == "either" or talent_value == job_value
 
 
 def _rate_fits(job: JobPost, talent: Talent) -> bool:
@@ -171,70 +169,32 @@ def _travel_flags_match(job: JobPost, talent: Talent) -> bool:
 
 
 def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
-    score = 0
-    reasons: List[str] = []
-
-    if _profession_category_matches(job, talent) and _norm(getattr(job, "profession_category", None)):
-        score += 10
-        reasons.append("Category match")
-
-    if _profession_matches(job, talent) and _norm(getattr(job, "profession", None)):
-        score += 20
-        reasons.append("Profession match")
-
-    if _discipline_matches(job, talent) and _norm(getattr(job, "engineering_discipline", None)):
-        score += 30
-        reasons.append("Discipline match")
-
-    if _industry_matches(job, talent) and _norm(getattr(job, "industry", None)):
-        score += 10
-        reasons.append("Industry match")
-
-    if _experience_matches(job, talent) and _norm(getattr(job, "experience_level", None)):
-        score += 8
-        reasons.append("Experience fit")
-
-    if _ir35_matches(job, talent) and _norm(getattr(job, "ir35_type", None)):
-        score += 5
-        reasons.append("IR35 fit")
-
-    if _location_matches(job, talent):
-        score += 5
-        reasons.append("Location overlap")
-
-    if _rate_fits(job, talent):
-        score += 8
-        reasons.append("Rate fit")
-
-    if getattr(job, "requires_travel", False) and getattr(talent, "willing_to_travel", False):
-        score += 1
-        reasons.append("Travel ready")
-
-    if getattr(job, "requires_vehicle", False) and getattr(talent, "has_vehicle", False):
-        score += 1
-        reasons.append("Has vehicle")
-
-    if getattr(job, "requires_own_tools", False) and getattr(talent, "has_tools", False):
-        score += 1
-        reasons.append("Has own tools")
-
-    job_required_skills = set(_split_lines(getattr(job, "required_skills", None)))
-    talent_skills = set(_split_lines(getattr(talent, "skills", None)))
-
-    if job_required_skills and talent_skills:
-        overlap = job_required_skills.intersection(talent_skills)
+    # Percentage of the weighted criteria actually supplied, not a probability
+    # of hiring success. Missing profile information never earns a match.
+    criteria = [
+        (bool(_norm(job.profession_category)), 10, _profession_category_matches(job, talent), "Category match"),
+        (bool(_norm(job.profession)), 20, _profession_matches(job, talent), "Profession match"),
+        (bool(_norm(job.engineering_discipline)), 30, _discipline_matches(job, talent), "Discipline match"),
+        (bool(_norm(job.industry)), 10, _industry_matches(job, talent), "Industry match"),
+        (bool(_norm(job.experience_level)), 8, _experience_matches(job, talent), "Experience fit"),
+        (bool(_norm(job.ir35_type)), 5, _ir35_matches(job, talent), "IR35 fit"),
+        (bool(_norm(job.location) or _norm(job.postcode)), 5, _location_matches(job, talent), "Location text overlap"),
+        (any(v is not None for v in [job.day_rate_min, job.day_rate_max, job.hourly_rate_min, job.hourly_rate_max]), 8, _rate_fits(job, talent), "Rate fit"),
+        (job.requires_travel, 1, talent.willing_to_travel, "Travel ready"),
+        (job.requires_vehicle, 1, talent.has_vehicle, "Has vehicle"),
+        (job.requires_own_tools, 1, talent.has_tools, "Has own tools"),
+    ]
+    total = sum(weight for present, weight, match, reason in criteria if present)
+    earned = sum(weight for present, weight, match, reason in criteria if present and match)
+    reasons = [reason for present, weight, match, reason in criteria if present and match]
+    required = set(_split_lines(job.required_skills))
+    if required:
+        overlap = required.intersection(_split_lines(talent.skills))
+        total += 8
+        earned += 8 * len(overlap) / len(required)
         if overlap:
-            score += min(len(overlap) * 2, 8)
-            reasons.append(f"{len(overlap)} required skill match")
-
-    if getattr(talent, "cv_url", None):
-        score += 1
-        reasons.append("CV uploaded")
-
-    if getattr(talent, "bio", None):
-        score += 1
-
-    return score, reasons
+            reasons.append(f"{len(overlap)} of {len(required)} required skills listed")
+    return (round(100 * earned / total) if total else 0), reasons
 
 
 def _available_for_job(session, job, talent):
@@ -242,12 +202,21 @@ def _available_for_job(session, job, talent):
         return True
     if job.end_date < job.start_date or (job.end_date - job.start_date).days > 366:
         return False
+    start_time = job.start_time or time.min
+    end_time = job.end_time or time.max
+    if end_time <= start_time:
+        return False
     existing = session.exec(select(Booking).where(Booking.talent_id == talent.id,
-        Booking.status != "cancelled", Booking.start_date <= job.end_date, Booking.end_date >= job.start_date)).first()
+        Booking.status != "cancelled", Booking.start_date <= job.end_date, Booking.end_date >= job.start_date,
+        Booking.start_time < end_time, Booking.end_time > start_time)).first()
     if existing:
         return False
-    return not talent.user_id or not _conflict_exists(session, talent.user_id,
-        datetime.combine(job.start_date, time.min), datetime.combine(job.end_date + timedelta(days=1), time.min))
+    day = job.start_date
+    while talent.user_id and day <= job.end_date:
+        if _conflict_exists(session, talent.user_id, datetime.combine(day, start_time), datetime.combine(day, end_time)):
+            return False
+        day += timedelta(days=1)
+    return True
 
 
 def _full_name(talent: Talent) -> str:
@@ -305,14 +274,12 @@ def get_company_job_matches(
 
         score, reasons = _score_match(job, talent)
 
-        if score <= 0:
-            continue
-
         results.append(
             {
                 "talent_id": talent.id,
                 "score": score,
-                "match_reasons": reasons[:6],
+                "match_reasons": reasons,
+                "talent_skills": talent.skills,
 
                 "talent_name": _full_name(talent),
                 "talent_profession_category": getattr(talent, "profession_category", None),
