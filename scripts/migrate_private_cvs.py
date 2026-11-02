@@ -3,12 +3,13 @@
 Default: report only. Apply after a database backup and private-bucket access check:
 python -m scripts.migrate_private_cvs --apply
 Remove verified public copies with the separate --remove-public-copy option.
-Run during a maintenance window so uploads cannot race the migration.
+Deploy private-upload support before running this migration. Concurrent new uploads
+are preserved by a conditional database update.
 """
 import argparse
 import re
 from botocore.exceptions import ClientError
-from sqlmodel import Session, select
+from sqlmodel import Session, select, update
 from app.db import engine
 from app.storage.r2 import r2_client, bucket_name, private_bucket_name, public_base_url
 from models.talent import Talent
@@ -56,8 +57,16 @@ def main():
             copied=s3.head_object(Bucket=destination,Key=private_key)
             if copied['ContentLength']!=original['ContentLength'] or copied['ETag']!=original['ETag']:
                 raise RuntimeError('Copy verification failed; original remains untouched')
-            talent.cv_storage_key=private_key;talent.cv_url=f'/api/uploads/cv/{talent.id}'
-            session.add(talent);session.commit()
+            result = session.exec(update(Talent).where(
+                Talent.id == talent.id,
+                Talent.cv_storage_key == None,  # noqa: E711
+                Talent.cv_url == talent.cv_url,
+            ).values(cv_storage_key=private_key, cv_url=f'/api/uploads/cv/{talent.id}'))
+            if result.rowcount != 1:
+                session.rollback()
+                print(f'Talent {talent.id}: newer CV preserved; legacy copy retained')
+                continue
+            session.commit()
             if args.remove_public_copy:s3.delete_object(Bucket=source,Key=key)
     print('Review any orphaned cvs/ objects in the public bucket before launch; do not delete without retaining a private copy.')
 
