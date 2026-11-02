@@ -22,6 +22,7 @@ router = APIRouter(tags=["applications"])
 
 class ProfessionalApplyCreate(BaseModel):
     notes: Optional[str] = None
+    talent_id: Optional[int] = None
 
 
 def _norm(value: Optional[str]) -> str:
@@ -173,7 +174,7 @@ def _job_talent_match(job: JobPost, talent: Talent, qualifications: List[Qualifi
 def professional_apply_to_job(
     job_id: int,
     payload: ProfessionalApplyCreate = Body(...),
-    user: User = Depends(require_role("professional")),
+    user: User = Depends(require_role("professional", "agency")),
     session: Session = Depends(get_session),
 ):
     job = session.exec(select(JobPost).where(JobPost.id == job_id).with_for_update()).first()
@@ -183,12 +184,19 @@ def professional_apply_to_job(
     if job.is_archived:
         raise HTTPException(status_code=409, detail="JOB_CLOSED")
 
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        )
-    ).first()
+    if user.role == "agency":
+        if not payload.talent_id:
+            raise HTTPException(status_code=422, detail="Select a professional to submit")
+        talent = session.exec(select(Talent).where(
+            Talent.id == payload.talent_id, Talent.agency_id == user.id,
+            Talent.user_id == None,  # noqa: E711
+        )).first()
+        if not talent:
+            raise HTTPException(status_code=404, detail="Agency professional not found")
+    else:
+        talent = session.exec(select(Talent).where(
+            Talent.user_id == user.id, Talent.agency_id == None,  # noqa: E711
+        )).first()
     if not talent:
         raise HTTPException(
             status_code=404,
@@ -267,6 +275,24 @@ def professional_list_my_applications(
             }
         )
     return out
+
+
+@router.get("/agency/applications", response_model=List[dict])
+def agency_list_applications(
+    user: User = Depends(require_role("agency")),
+    session: Session = Depends(get_session),
+):
+    rows = session.exec(
+        select(TalentApplication, Talent, JobPost)
+        .join(Talent, Talent.id == TalentApplication.talent_id)
+        .join(JobPost, JobPost.id == TalentApplication.jobpost_id)
+        .where(Talent.agency_id == user.id, Talent.user_id == None)  # noqa: E711
+        .order_by(TalentApplication.id.desc())
+    ).all()
+    return [{"application_id": a.id, "talent_id": t.id,
+             "talent_name": _talent_full_name(t), "jobpost_id": j.id,
+             "job_title": j.title, "status": a.status, "notes": a.notes}
+            for a, t, j in rows]
 
 
 # ===================== APPLICATIONS (VIEW JOB APPLICATIONS) =====================

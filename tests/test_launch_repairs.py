@@ -146,3 +146,74 @@ def test_notification_failure_is_retryable(context,monkeypatch):
     monkeypatch.setattr(notifications,'send_email',lambda *args:None)
     assert notifications.deliver_pending(s)['sent']==1
     assert notifications.deliver_pending(s)['sent']==0
+
+
+def test_agency_submission_ownership_and_withdrawal(context):
+    c, s, active, pro, co = context
+    agency = User(id=3, email='agency@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
+    other = User(id=4, email='other@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
+    s.add_all([agency, other,
+        Talent(id=3, agency_id=3, first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London'),
+        Talent(id=4, agency_id=4, first_name='Other', last_name='Professional', profession_category='engineering', profession='Engineer', location='London')])
+    s.commit()
+    job = c.post('/jobs/', json={'title': 'Agency opportunity', 'description': 'Test'}).json()
+    active[0] = agency
+    assert c.post(f'/jobs/{job["id"]}/apply', json={}).status_code == 422
+    for talent_id in [1, 4, 999]:
+        assert c.post(f'/jobs/{job["id"]}/apply', json={'talent_id': talent_id}).status_code == 404
+    response = c.post(f'/jobs/{job["id"]}/apply', json={'talent_id': 3})
+    assert response.status_code == 200
+    application = response.json()
+    assert c.post(f'/jobs/{job["id"]}/apply', json={'talent_id': 3}).status_code == 400
+    assert c.get('/agency/applications').json()[0]['talent_name'] == 'Agency Professional'
+    active[0] = other
+    assert c.get('/agency/applications').json() == []
+    assert c.patch(f'/applications/{application["id"]}', json={'status': 'withdrawn'}).status_code == 403
+    active[0] = co
+    assert c.patch(f'/applications/{application["id"]}', json={'status': 'shortlisted'}).status_code == 200
+    active[0] = agency
+    assert c.patch(f'/applications/{application["id"]}', json={'status': 'withdrawn'}).status_code == 200
+    active[0] = pro
+    assert c.get('/agency/applications').status_code == 403
+
+
+def test_agency_booking_response_and_ownership(context):
+    c, s, active, pro, co = context
+    agency = User(id=3, email='agency@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
+    other = User(id=4, email='other@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
+    s.add_all([agency, other, Talent(id=3, agency_id=3, first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London')]); s.commit()
+    body = payload(); body['talent_id'] = 3
+    req = c.post('/company/booking-requests', json=body).json()
+    active[0] = other
+    assert c.get('/agency/booking-requests').json() == []
+    assert c.post(f'/agency/booking-requests/{req["id"]}/accept').status_code == 404
+    active[0] = pro
+    assert c.post(f'/professional/booking-requests/{req["id"]}/accept').status_code == 404
+    active[0] = agency
+    assert len(c.get('/agency/booking-requests').json()) == 1
+    assert c.post(f'/agency/booking-requests/{req["id"]}/accept').status_code == 200
+    assert c.post(f'/agency/booking-requests/{req["id"]}/accept').status_code == 400
+    assert len(c.get('/bookings/').json()) == 1
+    active[0] = co
+    req = c.post('/company/booking-requests', json=body).json()
+    active[0] = agency
+    assert c.post(f'/agency/booking-requests/{req["id"]}/accept').status_code == 409
+    assert c.post(f'/agency/booking-requests/{req["id"]}/decline', json={'decline_reason': 'Unavailable'}).status_code == 200
+
+
+def test_cancel_pending_request_does_not_cancel_confirmed_booking(context):
+    c, s, active, pro, co = context
+    req = c.post('/company/booking-requests', json=payload()).json()
+    active[0] = User(id=99, role='company', email='other@example.com')
+    assert c.post(f'/company/booking-requests/{req["id"]}/cancel').status_code == 404
+    active[0] = co
+    assert c.post(f'/company/booking-requests/{req["id"]}/cancel').json()['status'] == 'cancelled'
+    active[0] = pro
+    assert c.post(f'/professional/booking-requests/{req["id"]}/accept').status_code == 400
+    active[0] = co
+    req = c.post('/company/booking-requests', json=payload()).json()
+    active[0] = pro
+    assert c.post(f'/professional/booking-requests/{req["id"]}/accept').status_code == 200
+    active[0] = co
+    assert c.post(f'/company/booking-requests/{req["id"]}/cancel').status_code == 409
+    assert len(s.exec(select(Booking)).all()) == 1

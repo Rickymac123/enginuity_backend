@@ -111,8 +111,8 @@ def create_booking_request(
 
     session.add(req)
     session.flush()
-    enqueue(session, f"booking-request:{req.id}", talent.user_id, "New ContractPros booking request",
-        "You have a new booking request. Sign in to review the details and respond.", "/dashboard/professional/booking-requests")
+    enqueue(session, f"booking-request:{req.id}", talent.user_id or talent.agency_id, "New ContractPros booking request",
+        "You have a new booking request. Sign in to review the details and respond.", f"/dashboard/{'professional' if talent.user_id else 'agency'}/booking-requests")
     session.commit()
     session.refresh(req)
     return req
@@ -147,24 +147,21 @@ def get_company_booking_requests(
     return requests
 
 
+@router.get("/agency/booking-requests", response_model=List[BookingRequestRead])
 @router.get("/professional/booking-requests", response_model=List[BookingRequestRead])
 def get_my_booking_requests(
-    user: User = Depends(require_role("professional")),
+    user: User = Depends(require_role("professional", "agency")),
     session: Session = Depends(get_session),
 ):
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        ).with_for_update()
-    ).first()
+    ownership = (Talent.agency_id == user.id) & (Talent.user_id == None) if user.role == "agency" else (Talent.user_id == user.id) & (Talent.agency_id == None)  # noqa: E711
+    talent_ids = session.exec(select(Talent.id).where(ownership)).all()
 
-    if not talent:
+    if not talent_ids:
         return []
 
     requests = session.exec(
         select(BookingRequest)
-        .where(BookingRequest.talent_id == talent.id)
+        .where(BookingRequest.talent_id.in_(talent_ids))
         .order_by(BookingRequest.requested_at.desc())
     ).all()
 
@@ -179,25 +176,23 @@ def get_my_booking_requests(
         session.commit()
         requests = session.exec(
             select(BookingRequest)
-            .where(BookingRequest.talent_id == talent.id)
+            .where(BookingRequest.talent_id.in_(talent_ids))
             .order_by(BookingRequest.requested_at.desc())
         ).all()
 
     return requests
 
 
+@router.post("/agency/booking-requests/{request_id}/accept", response_model=BookingRequestRead)
 @router.post("/professional/booking-requests/{request_id}/accept", response_model=BookingRequestRead)
 def accept_booking_request(
     request_id: int,
-    user: User = Depends(require_role("professional")),
+    user: User = Depends(require_role("professional", "agency")),
     session: Session = Depends(get_session),
 ):
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        ).with_for_update()
-    ).first()
+    ownership = (Talent.agency_id == user.id) & (Talent.user_id == None) if user.role == "agency" else (Talent.user_id == user.id) & (Talent.agency_id == None)  # noqa: E711
+    requested_talent = select(BookingRequest.talent_id).where(BookingRequest.id == request_id).scalar_subquery()
+    talent = session.exec(select(Talent).where(ownership, Talent.id == requested_talent).with_for_update()).first()
 
     if not talent:
         raise HTTPException(status_code=404, detail="TALENT_PROFILE_NOT_FOUND")
@@ -227,7 +222,7 @@ def accept_booking_request(
     from app.routers.availability import _conflict_exists
     day = req.start_date
     while day <= req.end_date:
-        if _conflict_exists(session, user.id, datetime.combine(day, req.start_time), datetime.combine(day, req.end_time)):
+        if talent.user_id and _conflict_exists(session, talent.user_id, datetime.combine(day, req.start_time), datetime.combine(day, req.end_time)):
             raise HTTPException(status_code=409, detail="BOOKING_CONFLICTS_WITH_AVAILABILITY")
         day += timedelta(days=1)
 
@@ -260,19 +255,17 @@ def accept_booking_request(
     return req
 
 
+@router.post("/agency/booking-requests/{request_id}/decline", response_model=BookingRequestRead)
 @router.post("/professional/booking-requests/{request_id}/decline", response_model=BookingRequestRead)
 def decline_booking_request(
     request_id: int,
     payload: BookingRequestRespond,
-    user: User = Depends(require_role("professional")),
+    user: User = Depends(require_role("professional", "agency")),
     session: Session = Depends(get_session),
 ):
-    talent = session.exec(
-        select(Talent).where(
-            Talent.user_id == user.id,
-            Talent.agency_id == None,  # noqa: E711
-        ).with_for_update()
-    ).first()
+    ownership = (Talent.agency_id == user.id) & (Talent.user_id == None) if user.role == "agency" else (Talent.user_id == user.id) & (Talent.agency_id == None)  # noqa: E711
+    requested_talent = select(BookingRequest.talent_id).where(BookingRequest.id == request_id).scalar_subquery()
+    talent = session.exec(select(Talent).where(ownership, Talent.id == requested_talent).with_for_update()).first()
 
     if not talent:
         raise HTTPException(status_code=404, detail="TALENT_PROFILE_NOT_FOUND")
@@ -302,4 +295,27 @@ def decline_booking_request(
         "Your booking request has been declined. Sign in to view the response.", "/dashboard/company/booking-requests")
     session.commit()
     session.refresh(req)
+    return req
+
+@router.post('/company/booking-requests/{request_id}/cancel', response_model=BookingRequestRead)
+def cancel_pending_booking_request(request_id: int,
+    user: User = Depends(require_role('company')),
+    session: Session = Depends(get_session)):
+    req = session.get(BookingRequest, request_id)
+    if not req or req.company_id != user.id:
+        raise HTTPException(status_code=404, detail='BOOKING_REQUEST_NOT_FOUND')
+    # Use the same talent lock as acceptance, then reload the request's current status.
+    talent = session.exec(select(Talent).where(Talent.id == req.talent_id).with_for_update()).first()
+    session.refresh(req)
+    if req.status != 'pending':
+        raise HTTPException(status_code=409, detail='Only pending requests can be cancelled. Contact the professional to discuss an accepted booking.')
+    req.status = 'cancelled'
+    req.responded_at = datetime.utcnow()
+    session.add(req)
+    if talent:
+        role = 'professional' if talent.user_id else 'agency'
+        enqueue(session, f'booking-cancelled:{req.id}', talent.user_id or talent.agency_id,
+            'Booking request cancelled', 'The company has cancelled this pending request. No booking has been confirmed.',
+            f'/dashboard/{role}/booking-requests')
+    session.commit(); session.refresh(req)
     return req
