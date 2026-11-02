@@ -7,7 +7,7 @@ from sqlalchemy.pool import StaticPool
 from auth.models import User
 from auth.deps import current_user
 from app.db import get_session
-from app.routers import companies, jobs, applications, booking_requests, uploads, bookings
+from app.routers import companies, jobs, applications, booking_requests, uploads, bookings, dashboards
 from models.talent import Talent
 from models.availability import Availability
 from models.booking import Booking
@@ -23,7 +23,7 @@ def context():
         co=User(id=2,email='co@example.com',hashed_password='unused',role='company',is_active=True,is_verified=True)
         s.add_all([pro,co,Talent(id=1,user_id=1,first_name='Test',last_name='Pro',profession_category='engineering',profession='Engineer',location='London')]);s.commit()
         active=[co];app=FastAPI()
-        for module in [companies,jobs,applications,booking_requests,uploads,bookings]:app.include_router(module.router)
+        for module in [companies,jobs,applications,booking_requests,uploads,bookings,dashboards]:app.include_router(module.router)
         def db():yield s
         app.dependency_overrides[get_session]=db;app.dependency_overrides[current_user]=lambda:active[0]
         yield TestClient(app),s,active,pro,co
@@ -247,3 +247,26 @@ def test_booking_acceptance_updates_application(context):
     assert c.post(f'/professional/booking-requests/{req["id"]}/accept').status_code == 200
     assert c.get('/professional/applications').json()[0]['status'] == 'accepted'
     assert c.patch(f'/applications/{application["id"]}', json={'status':'withdrawn'}).status_code == 409
+
+
+def test_company_dashboard_includes_direct_bookings_and_archived_job_history(context):
+    c, s, active, pro, co = context
+    job = c.post('/jobs/', json={'title': 'Historical job', 'description': 'Test'}).json()
+    active[0] = pro
+    assert c.post(f'/jobs/{job["id"]}/apply', json={}).status_code == 200
+    active[0] = co
+    assert c.delete(f'/jobs/{job["id"]}').status_code == 204
+    request = c.post('/company/booking-requests', json=payload()).json()
+    active[0] = pro
+    assert c.post(f'/professional/booking-requests/{request["id"]}/accept').status_code == 200
+    other = User(id=3, email='other-company@example.com', hashed_password='unused', role='company', is_active=True, is_verified=True)
+    s.add(other); s.commit()
+    active[0] = other
+    body = payload(); body.update(start_date='2027-02-01', end_date='2027-02-02')
+    assert c.post('/company/booking-requests', json=body).status_code == 200
+    active[0] = co
+    result = c.get('/dashboard/company')
+    assert result.status_code == 200
+    assert result.json() == dict(total_jobs=0, total_applications=1, total_bookings=1, total_booking_requests=1, applications_by_status={'pending': 1})
+    active[0] = other
+    assert c.get('/dashboard/company').json() == dict(total_jobs=0, total_applications=0, total_bookings=0, total_booking_requests=1, applications_by_status={})
