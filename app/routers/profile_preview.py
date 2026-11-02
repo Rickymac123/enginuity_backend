@@ -65,8 +65,8 @@ def get_my_profile_preview(
     # Flatten into the shape your frontend expects
     profile: Dict[str, Any] = {
         "id": user.id,
-        "first_name": getattr(user, "first_name", None),
-        "last_name": getattr(user, "last_name", None),
+        "first_name": talent.first_name if talent else getattr(user, "first_name", None),
+        "last_name": talent.last_name if talent else getattr(user, "last_name", None),
         "avatar_url": (
         getattr(talent, "avatar_url", None) if talent else None
         ) or getattr(user, "avatar_url", None),
