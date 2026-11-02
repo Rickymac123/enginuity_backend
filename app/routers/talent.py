@@ -3,6 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from app.db import get_session
 from auth.deps import require_role
@@ -24,7 +25,7 @@ def _get_my_talent(session: Session, user: User) -> Optional[Talent]:
 
 def _contains_if_present(statement, field, value: Optional[str]):
     if value and value.strip():
-        return statement.where(field.contains(value.strip()))
+        return statement.where(func.lower(field).contains(value.strip().lower(), autoescape=True))
     return statement
 
 
@@ -88,10 +89,10 @@ def list_talent(
     if q and q.strip():
         qv = q.strip()
         statement = statement.where(
-            Talent.first_name.contains(qv)
-            | Talent.last_name.contains(qv)
-            | Talent.bio.contains(qv)
-            | Talent.skills.contains(qv)
+            func.lower(Talent.first_name).contains(qv.lower(), autoescape=True)
+            | func.lower(Talent.last_name).contains(qv.lower(), autoescape=True)
+            | func.lower(Talent.bio).contains(qv.lower(), autoescape=True)
+            | func.lower(Talent.skills).contains(qv.lower(), autoescape=True)
         )
 
     if min_day_rate is not None:
