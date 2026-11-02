@@ -52,6 +52,9 @@ def create_booking_request(
         if not application:
             raise HTTPException(status_code=404, detail="APPLICATION_NOT_FOUND")
 
+        if application.status in {"withdrawn", "rejected"}:
+            raise HTTPException(status_code=409, detail="APPLICATION_NO_LONGER_ACTIVE")
+
         job = session.get(JobPost, application.jobpost_id)
         if not job or getattr(job, "company_id", None) != user.id:
             raise HTTPException(status_code=403, detail="NOT_ALLOWED_FOR_APPLICATION")
@@ -210,6 +213,13 @@ def accept_booking_request(
         session.commit()
         raise HTTPException(status_code=400, detail="BOOKING_REQUEST_EXPIRED")
 
+    application = None
+    if req.application_id is not None:
+        application = session.exec(select(TalentApplication).where(
+            TalentApplication.id == req.application_id).with_for_update()).first()
+        if not application or application.status in {"withdrawn", "rejected"}:
+            raise HTTPException(status_code=409, detail="APPLICATION_NO_LONGER_ACTIVE")
+
     conflict = session.exec(select(Booking).where(
         Booking.talent_id == talent.id,
         Booking.status != "cancelled",
@@ -228,6 +238,10 @@ def accept_booking_request(
 
     req.status = "accepted"
     req.responded_at = datetime.utcnow()
+    if application:
+        application.status = "accepted"
+        application.updated_at = req.responded_at
+        session.add(application)
 
     booking = Booking(
         booking_request_id=req.id,

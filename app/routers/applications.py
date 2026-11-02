@@ -459,7 +459,7 @@ def update_application(
     user: User = Depends(require_role("company", "agency", "professional")),
     session: Session = Depends(get_session),
 ):
-    app_obj = session.get(TalentApplication, application_id)
+    app_obj = session.exec(select(TalentApplication).where(TalentApplication.id == application_id).with_for_update()).first()
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found")
 

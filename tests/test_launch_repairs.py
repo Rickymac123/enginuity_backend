@@ -217,3 +217,33 @@ def test_cancel_pending_request_does_not_cancel_confirmed_booking(context):
     active[0] = co
     assert c.post(f'/company/booking-requests/{req["id"]}/cancel').status_code == 409
     assert len(s.exec(select(Booking)).all()) == 1
+
+
+def test_withdrawn_application_cannot_be_booked(context):
+    c, s, active, pro, co = context
+    job = c.post('/jobs/', json={'title':'Test','description':'Test'}).json()
+    active[0] = pro
+    application = c.post(f'/jobs/{job["id"]}/apply', json={}).json()
+    body = payload(); body.update(jobpost_id=job['id'], application_id=application['id'])
+    active[0] = co
+    req = c.post('/company/booking-requests', json=body).json()
+    active[0] = pro
+    assert c.patch(f'/applications/{application["id"]}', json={'status':'withdrawn'}).status_code == 200
+    assert c.post(f'/professional/booking-requests/{req["id"]}/accept').status_code == 409
+    active[0] = co
+    assert c.post('/company/booking-requests', json=body).status_code == 409
+    assert not s.exec(select(Booking)).all()
+
+
+def test_booking_acceptance_updates_application(context):
+    c, s, active, pro, co = context
+    job = c.post('/jobs/', json={'title':'Test','description':'Test'}).json()
+    active[0] = pro
+    application = c.post(f'/jobs/{job["id"]}/apply', json={}).json()
+    body = payload(); body.update(jobpost_id=job['id'], application_id=application['id'])
+    active[0] = co
+    req = c.post('/company/booking-requests', json=body).json()
+    active[0] = pro
+    assert c.post(f'/professional/booking-requests/{req["id"]}/accept').status_code == 200
+    assert c.get('/professional/applications').json()[0]['status'] == 'accepted'
+    assert c.patch(f'/applications/{application["id"]}', json={'status':'withdrawn'}).status_code == 409
