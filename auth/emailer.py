@@ -5,9 +5,11 @@ import smtplib
 from email.message import EmailMessage
 from urllib.parse import quote
 import httpx
+from auth.email_templates import brand_email, plain_text
 
 
 def send_email(to_email: str, subject: str, html: str) -> None:
+    html = brand_email(subject, html)
     provider = os.getenv("MAIL_PROVIDER", "smtp")
     sender = os.getenv("MAIL_FROM") or os.getenv("SMTP_USER")
     if not sender:
@@ -40,7 +42,7 @@ def send_email(to_email: str, subject: str, html: str) -> None:
         raise RuntimeError("SMTP credentials are incomplete")
     msg = EmailMessage()
     msg["From"], msg["To"], msg["Subject"] = sender, to_email, subject
-    msg.set_content("Please view the HTML version of this ContractPros email for the requested link.")
+    msg.set_content(plain_text(html))
     msg.add_alternative(html, subtype="html")
     port = int(os.getenv("SMTP_PORT", "587"))
     transport = smtplib.SMTP_SSL if port == 465 else smtplib.SMTP
