@@ -363,6 +363,7 @@ def company_get_application_professional_profile(
 
     return {
         "profile": {
+            "id": talent.id,
             "first_name": talent.first_name,
             "last_name": talent.last_name,
             "avatar_url": talent.avatar_url,

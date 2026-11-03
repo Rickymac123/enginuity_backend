@@ -48,7 +48,10 @@ def test_agency_full_lifecycle_and_tenant_boundaries(agency_context):
     active[0]=users[0];a=c.post(f'/jobs/{j["id"]}/apply',json={'talent_id':tid});assert a.status_code==200,a.text
     assert c.get('/agency/applications').json()[0]['talent_id']==tid
     active[0]=users[1];assert c.get(f'/jobs/{j["id"]}/applications').json()[0]['talent_id']==tid
-    body=payload();body.update(talent_id=tid,application_id=a.json()['id'],jobpost_id=j['id'])
+    profile=c.get(f'/company/applications/{a.json()["id"]}/professional-profile')
+    assert profile.status_code==200,profile.text
+    assert profile.json()['profile']['id']==tid
+    body=payload();body.update(talent_id=profile.json()['profile']['id'],application_id=a.json()['id'],jobpost_id=j['id'])
     req=c.post('/company/booking-requests',json=body);assert req.status_code==200,req.text
     rid=req.json()['id'];active[0]=users[2]
     assert c.post(f'/agency/booking-requests/{rid}/accept').status_code==404
