@@ -94,78 +94,8 @@ def _rate_match(job: JobPost, talent: Talent) -> bool:
 
 
 def _job_talent_match(job: JobPost, talent: Talent, qualifications: List[Qualification]) -> dict:
-    total_weight = 0
-    achieved = 0
-
-    matches: List[str] = []
-    mismatches: List[str] = []
-
-    def check(label: str, condition: bool, weight: int):
-        nonlocal total_weight, achieved
-        total_weight += weight
-        if condition:
-            achieved += weight
-            matches.append(label)
-        else:
-            mismatches.append(label)
-
-    # Hard/important criteria
-    job_profession = _norm(getattr(job, "profession", None))
-    talent_profession = _norm(getattr(talent, "profession", None))
-    check("Profession match", not job_profession or job_profession == talent_profession, 20)
-
-    job_discipline = _norm(getattr(job, "engineering_discipline", None))
-    talent_discipline = _norm(getattr(talent, "engineering_discipline", None))
-    check("Discipline match", not job_discipline or job_discipline == talent_discipline, 25)
-
-    job_industry = _norm(getattr(job, "industry", None))
-    talent_industry = _norm(getattr(talent, "industry", None))
-    check("Industry match", not job_industry or job_industry == talent_industry, 10)
-
-    job_ir35 = _norm(getattr(job, "ir35_type", None))
-    talent_ir35 = _norm(getattr(talent, "ir35_preference", None))
-    ir35_ok = (
-        not job_ir35
-        or not talent_ir35
-        or talent_ir35 == "either"
-        or talent_ir35 == job_ir35
-    )
-    check("IR35 fit", ir35_ok, 10)
-
-    location_ok = (
-        not _norm(getattr(job, "location", None))
-        or _contains(getattr(job, "location", None), getattr(talent, "location", None))
-        or _contains(getattr(job, "postcode", None), getattr(talent, "postcode", None))
-    )
-    check("Location fit", location_ok, 10)
-
-    check("Rate fit", _rate_match(job, talent), 10)
-
-    # Skills
-    required_skills = set(_split_csv_or_lines(getattr(job, "required_skills", None)))
-    talent_skills = set(_split_csv_or_lines(getattr(talent, "skills", None)))
-    skills_ok = not required_skills or required_skills.issubset(talent_skills)
-    check("Required skills match", skills_ok, 10)
-
-    # Qualifications
-    required_qualifications = set(
-        _split_csv_or_lines(getattr(job, "required_qualifications", None))
-    )
-    talent_qualification_names = {
-        _norm(getattr(q, "name", None)) for q in qualifications if getattr(q, "name", None)
-    }
-    quals_ok = not required_qualifications or required_qualifications.issubset(
-        talent_qualification_names
-    )
-    check("Required qualifications match", quals_ok, 5)
-
-    percentage = round((achieved / total_weight) * 100) if total_weight > 0 else 0
-
-    return {
-        "match_percentage": percentage,
-        "match_reasons": matches,
-        "mismatch_reasons": mismatches,
-    }
+    from app.routers.company_matches import _match_details
+    return _match_details(job, talent, qualifications)
 
 
 # ===================== APPLICATIONS (PROFESSIONAL APPLY) =====================
@@ -202,6 +132,9 @@ def professional_apply_to_job(
             status_code=404,
             detail="Professional profile not completed, please complete your profile before applying",
         )
+
+    from app.routers.talent import require_representation
+    require_representation(talent)
 
     existing = session.exec(
         select(TalentApplication).where(

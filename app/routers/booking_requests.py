@@ -213,6 +213,9 @@ def accept_booking_request(
         session.commit()
         raise HTTPException(status_code=400, detail="BOOKING_REQUEST_EXPIRED")
 
+    from app.routers.talent import require_representation
+    require_representation(talent)
+
     application = None
     if req.application_id is not None:
         application = session.exec(select(TalentApplication).where(
