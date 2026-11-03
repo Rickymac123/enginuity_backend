@@ -172,7 +172,7 @@ def download_cv(talent_id: int,
 @router.post("/uploads/company-logo")
 async def upload_company_logo(
     file: UploadFile = File(...),
-    user: User = Depends(require_role("company")),
+    user: User = Depends(require_role("company", "agency")),
     session: Session = Depends(get_session),
 ):
     if file.content_type not in ALLOWED_COMPANY_LOGO_TYPES:
