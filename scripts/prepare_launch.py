@@ -14,7 +14,7 @@ def migrate(engine):
             connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_review_booking ON review (booking_id)"))
         if "company" in tables:
             columns = {c["name"] for c in inspect(connection).get_columns("company")}
-            for name, kind in {"industry":"VARCHAR", "postcode":"VARCHAR", "logo_url":"VARCHAR", "updated_at":"TIMESTAMP"}.items():
+            for name, kind in {"is_public":"BOOLEAN NOT NULL DEFAULT FALSE", "registration_number":"VARCHAR", "industry":"VARCHAR", "postcode":"VARCHAR", "logo_url":"VARCHAR", "updated_at":"TIMESTAMP"}.items():
                 if name not in columns:
                     connection.execute(text(f"ALTER TABLE company ADD COLUMN {name} {kind}"))
             connection.execute(text("UPDATE company SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))

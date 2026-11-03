@@ -5,6 +5,8 @@ from datetime import datetime
 from sqlmodel import SQLModel, Field
 
 class CompanyUpdate(SQLModel):
+    is_public: Optional[bool] = None
+    registration_number: Optional[str] = None
     name: Optional[str] = None
     website: Optional[str] = None
     industry: Optional[str] = None
@@ -14,6 +16,8 @@ class CompanyUpdate(SQLModel):
     description: Optional[str] = None
 
 class CompanyBase(SQLModel):
+    is_public: bool = False
+    registration_number: Optional[str] = None
     name: str
     industry: Optional[str] = None
     postcode: Optional[str] = None
