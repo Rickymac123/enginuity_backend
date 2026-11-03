@@ -35,7 +35,8 @@ def test_invalid_attestation_does_not_create_profile(agency_context,change):
     assert c.post('/talent/',json=p).status_code==422
     assert not s.exec(select(Talent)).all()
 
-def test_agency_full_lifecycle_and_tenant_boundaries(agency_context):
+@pytest.mark.parametrize("legacy_request", [False, True])
+def test_agency_full_lifecycle_and_tenant_boundaries(agency_context, legacy_request):
     c,s,active,users=agency_context
     r=c.post('/talent/',json=person());assert r.status_code==200,r.text
     p=r.json();tid=p['id'];assert p['notice_version']=='2026-11-02' and p['representation_confirmed_at'];assert p['day_rate'] is None
@@ -51,12 +52,18 @@ def test_agency_full_lifecycle_and_tenant_boundaries(agency_context):
     profile=c.get(f'/company/applications/{a.json()["id"]}/professional-profile')
     assert profile.status_code==200,profile.text
     assert profile.json()['profile']['id']==tid
-    body=payload();body.update(talent_id=profile.json()['profile']['id'],application_id=a.json()['id'],jobpost_id=j['id'])
+    body=payload();body.update(talent_id=profile.json()['profile']['id'],application_id=a.json()['id'])
     req=c.post('/company/booking-requests',json=body);assert req.status_code==200,req.text
-    rid=req.json()['id'];active[0]=users[2]
+    assert req.json()['jobpost_id']==j['id']
+    rid=req.json()['id']
+    if legacy_request:
+        from models.booking_request import BookingRequest
+        old=s.get(BookingRequest,rid);old.jobpost_id=None;s.add(old);s.commit()
+    active[0]=users[2]
     assert c.post(f'/agency/booking-requests/{rid}/accept').status_code==404
     active[0]=users[0];assert c.post(f'/agency/booking-requests/{rid}/accept').status_code==200
-    assert len(s.exec(select(Booking)).all())==1
+    saved=s.exec(select(Booking)).all()
+    assert len(saved)==1 and saved[0].jobpost_id==j["id"]
     assert c.delete(f'/talent/{tid}').status_code==409
     assert s.get(Talent,tid) and s.exec(select(TalentApplication)).first()
 

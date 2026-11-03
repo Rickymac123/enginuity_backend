@@ -99,7 +99,7 @@ def create_booking_request(
     req = BookingRequest(
         company_id=user.id,
         talent_id=payload.talent_id,
-        jobpost_id=payload.jobpost_id,
+        jobpost_id=application.jobpost_id if payload.application_id is not None else payload.jobpost_id,
         application_id=payload.application_id,
         start_date=payload.start_date,
         end_date=payload.end_date,
@@ -222,6 +222,14 @@ def accept_booking_request(
             TalentApplication.id == req.application_id).with_for_update()).first()
         if not application or application.status in {"withdrawn", "rejected"}:
             raise HTTPException(status_code=409, detail="APPLICATION_NO_LONGER_ACTIVE")
+
+    # Older application-based requests may not have copied the job reference.
+    if application:
+        if application.talent_id != req.talent_id:
+            raise HTTPException(status_code=409, detail="APPLICATION_TALENT_MISMATCH")
+        if req.jobpost_id is not None and req.jobpost_id != application.jobpost_id:
+            raise HTTPException(status_code=409, detail="APPLICATION_JOB_MISMATCH")
+        req.jobpost_id = application.jobpost_id
 
     conflict = session.exec(select(Booking).where(
         Booking.talent_id == talent.id,
