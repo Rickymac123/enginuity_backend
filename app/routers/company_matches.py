@@ -58,8 +58,8 @@ def _profession_matches(job: JobPost, talent: Talent) -> bool:
 
 
 def _discipline_matches(job: JobPost, talent: Talent) -> bool:
-    job_value = _norm(getattr(job, "engineering_discipline", None))
-    talent_value = _norm(getattr(talent, "engineering_discipline", None))
+    job_value = re.sub(r"[-\s]", "", _norm(getattr(job, "engineering_discipline", None)))
+    talent_value = re.sub(r"[-\s]", "", _norm(getattr(talent, "engineering_discipline", None)))
 
     if not job_value:
         return True
@@ -67,7 +67,7 @@ def _discipline_matches(job: JobPost, talent: Talent) -> bool:
     if job_value == talent_value:
         return True
 
-    if talent_value == "multi-skilled" and job_value in {"electrical", "mechanical"}:
+    if talent_value == "multiskilled" and job_value in {"electrical", "mechanical"}:
         return True
 
     return False
@@ -168,7 +168,7 @@ def _travel_flags_match(job: JobPost, talent: Talent) -> bool:
     return True
 
 
-def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
+def _match_details(job: JobPost, talent: Talent, qualifications=None) -> dict:
     # Percentage of the weighted criteria actually supplied, not a probability
     # of hiring success. Missing profile information never earns a match.
     criteria = [
@@ -187,6 +187,7 @@ def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
     total = sum(weight for present, weight, match, reason in criteria if present)
     earned = sum(weight for present, weight, match, reason in criteria if present and match)
     reasons = [reason for present, weight, match, reason in criteria if present and match]
+    gaps = [reason + " not established" for present, weight, match, reason in criteria if present and not match]
     required = set(_split_lines(job.required_skills))
     if required:
         overlap = required.intersection(_split_lines(talent.skills))
@@ -194,7 +195,25 @@ def _score_match(job: JobPost, talent: Talent) -> tuple[int, List[str]]:
         earned += 8 * len(overlap) / len(required)
         if overlap:
             reasons.append(f"{len(overlap)} of {len(required)} required skills listed")
-    return (round(100 * earned / total) if total else 0), reasons
+        if required - overlap:
+            gaps.append("Required skills not listed: " + ", ".join(sorted(required - overlap)))
+    required_quals = set(_split_lines(job.required_qualifications))
+    if required_quals and qualifications is not None:
+        listed = {_norm(q.name) for q in qualifications}
+        missing = required_quals - listed
+        total += 5
+        if missing:
+            gaps.append("Required qualifications not listed: " + ", ".join(sorted(missing)))
+        else:
+            earned += 5
+            reasons.append("Required qualifications listed (verify evidence)")
+    return {"match_percentage": round(100 * earned / total) if total else 0,
+            "match_reasons": reasons, "mismatch_reasons": gaps}
+
+
+def _score_match(job: JobPost, talent: Talent, qualifications=None) -> tuple[int, List[str]]:
+    details = _match_details(job, talent, qualifications)
+    return details["match_percentage"], details["match_reasons"]
 
 
 def _available_for_job(session, job, talent):
@@ -272,7 +291,7 @@ def get_company_job_matches(
         if not _travel_flags_match(job, talent):
             continue
 
-        score, reasons = _score_match(job, talent)
+        score, reasons = _score_match(job, talent, qualifications)
 
         results.append(
             {

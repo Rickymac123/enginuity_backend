@@ -20,6 +20,11 @@ def migrate(engine):
             connection.execute(text("UPDATE company SET updated_at = CURRENT_TIMESTAMP WHERE updated_at IS NULL"))
         if "talent" in tables and "cv_storage_key" not in {c["name"] for c in inspect(connection).get_columns("talent")}:
             connection.execute(text("ALTER TABLE talent ADD COLUMN cv_storage_key VARCHAR"))
+        if "talent" in tables:
+            columns = {c["name"] for c in inspect(connection).get_columns("talent")}
+            for name, kind in {"representation_confirmed_at":"TIMESTAMP", "notice_provided_on":"DATE", "notice_delivery_method":"VARCHAR", "notice_version":"VARCHAR"}.items():
+                if name not in columns:
+                    connection.execute(text(f"ALTER TABLE talent ADD COLUMN {name} {kind}"))
         if "booking" in tables:
             duplicate = connection.execute(text("SELECT booking_request_id FROM booking GROUP BY booking_request_id HAVING COUNT(*) > 1 LIMIT 1")).first()
             if duplicate:

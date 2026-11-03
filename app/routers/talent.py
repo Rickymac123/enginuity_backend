@@ -9,7 +9,7 @@ from app.db import get_session
 from auth.deps import require_role
 from auth.models import User
 
-from models.talent import Talent, TalentCreate, TalentRead, TalentUpdate
+from models.talent import Talent, TalentCreate, TalentRead, TalentUpdate, AgencyTalentCreate, AgencyRepresentation
 
 router = APIRouter(tags=["talent"])
 
@@ -29,21 +29,46 @@ def _contains_if_present(statement, field, value: Optional[str]):
     return statement
 
 
+def _record_representation(talent, evidence):
+    talent.representation_confirmed_at = datetime.utcnow()
+    talent.notice_provided_on = evidence.notice_provided_on
+    talent.notice_delivery_method = evidence.notice_delivery_method
+    talent.notice_version = "2026-11-02"
+
+
+def require_representation(talent):
+    if talent.agency_id and not (talent.representation_confirmed_at and talent.notice_provided_on):
+        raise HTTPException(status_code=409, detail="Open this professional's agency profile and record representation authority and privacy notice delivery before applying or accepting a booking.")
+
+
+@router.post("/talent/{talent_id}/representation", response_model=TalentRead)
+def record_representation(talent_id: int, evidence: AgencyRepresentation,
+                          user: User = Depends(require_role("agency")), session: Session = Depends(get_session)):
+    talent = session.get(Talent, talent_id)
+    if not talent or talent.agency_id != user.id or talent.user_id is not None:
+        raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
+    _record_representation(talent, evidence)
+    talent.updated_at = datetime.utcnow()
+    session.add(talent); session.commit(); session.refresh(talent)
+    return talent
+
+
 # ===================== TALENT (AGENCY) =====================
 
 @router.post("/talent/", response_model=TalentRead)
 def create_talent(
-    talent_in: TalentCreate,
+    talent_in: AgencyTalentCreate,
     user: User = Depends(require_role("agency")),
     session: Session = Depends(get_session),
 ):
-    data = talent_in.model_dump()
+    data = talent_in.model_dump(exclude={"representation"})
 
     data.pop("agency_id", None)
     data.pop("user_id", None)
     data.pop("id", None)
 
     talent = Talent(**data, agency_id=user.id, user_id=None)
+    _record_representation(talent, talent_in.representation)
     session.add(talent)
     session.commit()
     session.refresh(talent)
@@ -170,6 +195,11 @@ def delete_talent(
     ):
         raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
 
+    from models.application import TalentApplication
+    from models.booking_request import BookingRequest
+    from models.qualification import Qualification
+    if any(session.exec(select(model).where(model.talent_id == talent_id)).first() for model in (TalentApplication, BookingRequest, Qualification)) or talent.cv_storage_key:
+        raise HTTPException(status_code=409, detail="This profile has linked records. Contact info@contractpros.co.uk for a retention-aware removal so booking and application history is preserved.")
     session.delete(talent)
     session.commit()
     return None

@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, time, datetime
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -153,7 +153,7 @@ def test_agency_submission_ownership_and_withdrawal(context):
     agency = User(id=3, email='agency@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
     other = User(id=4, email='other@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
     s.add_all([agency, other,
-        Talent(id=3, agency_id=3, first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London'),
+        Talent(id=3, agency_id=3, representation_confirmed_at=datetime(2026,1,1), notice_provided_on=date(2026,1,1), first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London'),
         Talent(id=4, agency_id=4, first_name='Other', last_name='Professional', profession_category='engineering', profession='Engineer', location='London')])
     s.commit()
     job = c.post('/jobs/', json={'title': 'Agency opportunity', 'description': 'Test'}).json()
@@ -181,7 +181,7 @@ def test_agency_booking_response_and_ownership(context):
     c, s, active, pro, co = context
     agency = User(id=3, email='agency@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
     other = User(id=4, email='other@example.com', hashed_password='unused', role='agency', is_active=True, is_verified=True)
-    s.add_all([agency, other, Talent(id=3, agency_id=3, first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London')]); s.commit()
+    s.add_all([agency, other, Talent(id=3, agency_id=3, representation_confirmed_at=datetime(2026,1,1), notice_provided_on=date(2026,1,1), first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London')]); s.commit()
     body = payload(); body['talent_id'] = 3
     req = c.post('/company/booking-requests', json=body).json()
     active[0] = other
