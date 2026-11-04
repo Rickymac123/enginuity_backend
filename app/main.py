@@ -28,7 +28,10 @@ from app.routers.company_talent import router as company_talent_router
 
 from app.routers.social_auth import router as social_auth_router
 
+from app.routers.billing import router as billing_router
+
 app = FastAPI(title="ContractPros API")
+app.include_router(billing_router)
 
 @app.middleware("http")
 async def limit_public_requests(request, call_next):

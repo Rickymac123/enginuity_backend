@@ -1,3 +1,4 @@
+from app.billing import require_subscription
 from typing import List, Optional
 from datetime import datetime
 
@@ -106,6 +107,7 @@ def professional_apply_to_job(
     payload: ProfessionalApplyCreate = Body(...),
     user: User = Depends(require_role("professional", "agency")),
     session: Session = Depends(get_session),
+    subscription_access = Depends(require_subscription),
 ):
     job = session.exec(select(JobPost).where(JobPost.id == job_id).with_for_update()).first()
     if not job:

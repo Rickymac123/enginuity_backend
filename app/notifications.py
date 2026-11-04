@@ -32,6 +32,20 @@ def enqueue(session, event_key, recipient_id, subject, message, path):
 
 def deliver_pending(session: Session, limit=50):
     now = datetime.utcnow()
+    from models.billing import LaunchRedemption, BillingAccount
+    from app.billing import enabled
+    if enabled():
+        grants = session.exec(select(LaunchRedemption).with_for_update(skip_locked=True)).all()
+        for grant in grants:
+            account = session.get(BillingAccount, grant.user_id)
+            if account and account.status == 'active':
+                continue
+            days = (grant.expires_at - now).total_seconds() / 86400
+            stage = 'expired' if days <= 0 else 'one-day' if days <= 1 else 'seven-days' if days <= 7 else None
+            if stage:
+                enqueue(session, f'founder-{stage}:{grant.user_id}', grant.user_id,
+                        'Your ContractPros free launch access ' + ('has ended' if stage == 'expired' else 'ends soon'),
+                        f'Your free access ends on {grant.expires_at:%d %B %Y}. No automatic charge will be made. Choose a monthly or annual plan to start new activity. Existing booking management and history remain available.', '/dashboard/billing')
     from models.booking import Booking
     from models.review import Review
     # Lock completed bookings so concurrent scheduler runs cannot enqueue twice.
@@ -45,6 +59,7 @@ def deliver_pending(session: Session, limit=50):
                     'If you have a moment, share your experience of your completed booking. This is your only review reminder.',
                     f'/dashboard/company/booking-requests/{booking.booking_request_id}/review')
     session.flush()
+    now = datetime.utcnow()
     notifications = session.exec(select(EmailNotification).where(
         EmailNotification.sent_at == None, EmailNotification.next_attempt_at <= now,
         EmailNotification.attempts < 10,

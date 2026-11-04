@@ -6,6 +6,7 @@ from app.db import engine, get_session  # Shared dependency: one session per req
 
 # IMPORTANT: ensure models are imported so SQLModel registers tables
 from auth.models import User  # noqa: F401
+from models.billing import BillingAccount, LaunchOffer, LaunchRedemption, BillingEvent  # noqa: F401
 from app.rate_limits import RequestWindow  # noqa: F401
 from app.notifications import EmailNotification  # noqa: F401
 from models.social_auth import SocialIdentity, SocialFlow, RegistrationEmail  # noqa: F401

@@ -1,3 +1,4 @@
+from app.billing import require_subscription
 from typing import List, Optional
 from datetime import datetime
 
@@ -60,6 +61,7 @@ def create_talent(
     talent_in: AgencyTalentCreate,
     user: User = Depends(require_role("agency")),
     session: Session = Depends(get_session),
+    subscription_access = Depends(require_subscription),
 ):
     data = talent_in.model_dump(exclude={"representation"})
 
