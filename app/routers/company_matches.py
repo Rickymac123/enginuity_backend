@@ -1,4 +1,3 @@
-from app.billing import require_subscription
 from typing import List, Optional
 import re
 from datetime import datetime, time, timedelta
@@ -251,7 +250,6 @@ def get_company_job_matches(
     job_id: int,
     user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
-    subscription_access = Depends(require_subscription),
 ):
     job = session.get(JobPost, job_id)
     if not job:

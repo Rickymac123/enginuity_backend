@@ -67,7 +67,12 @@ def test_checkout_server_prices_customer_binding_and_duplicate(ctx,monkeypatch):
   calls.append((method,path,data,key))
   if path.startswith('prices/'):return {'id':'price_agency_year','currency':'gbp','unit_amount':59000,'active':True,'tax_behavior':'exclusive','recurring':{'interval':'year','interval_count':1}}
   if path.startswith('tax_rates/'):return {'id':'txr_uk','percentage':20,'inclusive':False,'country':'GB','active':True}
-  if path=='customers':return {'id':'cus_one'}
+  if path=='customers':
+   assert data['metadata[contractpros]']=='true'
+   return {'id':'cus_one'}
+  if path=='customers/cus_one':
+   assert data=={'metadata[contractpros]':'true'}
+   return {'id':'cus_one'}
   if path.startswith('subscriptions?'):return {'data':[]}
   if method=='GET' and path.startswith('checkout/sessions/'):return {'status':'open','url':'https://checkout.stripe.com/test','metadata':{'interval':'year'}}
   if path=='checkout/sessions':return {'id':'cs_one','url':'https://checkout.stripe.com/test','expires_at':int(time.time())+1800}
@@ -124,7 +129,12 @@ def test_checkout_timeout_reuses_persisted_attempt(ctx,monkeypatch):
  def fake(method,path,data=None,key=None):
   if path.startswith('prices/'):return {'id':'price_agency_month','currency':'gbp','unit_amount':5900,'active':True,'tax_behavior':'exclusive','recurring':{'interval':'month','interval_count':1}}
   if path.startswith('tax_rates/'):return {'id':'txr_uk','percentage':20,'inclusive':False,'country':'GB','active':True}
-  if path=='customers':return {'id':'cus_one'}
+  if path=='customers':
+   assert data['metadata[contractpros]']=='true'
+   return {'id':'cus_one'}
+  if path=='customers/cus_one':
+   assert data=={'metadata[contractpros]':'true'}
+   return {'id':'cus_one'}
   if path.startswith('subscriptions?'):return {'data':[]}
   if path=='checkout/sessions':
    attempts.append((key,data.copy()))

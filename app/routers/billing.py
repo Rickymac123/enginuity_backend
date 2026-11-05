@@ -124,7 +124,10 @@ def checkout(body:CheckoutInput,user:User=Depends(require_role('company','agency
     a=locked_account(session,user)
     grant=session.get(LaunchRedemption,user.id)
     if grant and grant.expires_at>datetime.utcnow():raise HTTPException(409,'Enjoy your free access first. Choose a paid plan when it ends.')
-    if a.customer_id:reconcile(session,a)
+    if a.customer_id:
+        # Scope country restrictions to this platform in RMC's shared Stripe account.
+        stripe('POST','customers/'+quote(a.customer_id),{'metadata[contractpros]':'true'})
+        reconcile(session,a)
     if a.status in ('active','trialing','past_due','unpaid','incomplete','paused'):raise HTTPException(409,'Manage your existing subscription instead of creating another one.')
     if a.checkout_id:
         old=stripe('GET','checkout/sessions/'+quote(a.checkout_id))
@@ -140,7 +143,7 @@ def checkout(body:CheckoutInput,user:User=Depends(require_role('company','agency
     tax=stripe('GET','tax_rates/'+quote(os.environ['STRIPE_UK_VAT_RATE']))
     if tax.get('percentage')!=20 or tax.get('inclusive') or not tax.get('active') or tax.get('country')!='GB':raise HTTPException(503,'VAT configuration needs attention.')
     if not a.customer_id:
-        customer=stripe('POST','customers',{'email':user.email,'metadata[user_id]':str(user.id)},f'contractpros-customer-{user.id}')
+        customer=stripe('POST','customers',{'email':user.email,'metadata[user_id]':str(user.id),'metadata[contractpros]':'true'},f'contractpros-customer-{user.id}')
         a.customer_id=customer['id'];session.add(a);session.flush()
     if a.checkout_attempt and a.checkout_expires and a.checkout_expires>datetime.utcnow():
         if a.checkout_interval!=body.interval:raise HTTPException(409,'An earlier checkout is still being prepared. Retry the same plan or wait for it to expire.')
