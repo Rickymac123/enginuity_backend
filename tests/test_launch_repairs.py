@@ -30,7 +30,7 @@ def context():
     engine.dispose()
 
 def payload():
-    return dict(talent_id=1,start_date='2027-01-04',end_date='2027-01-05',start_time='09:00:00',end_time='17:00:00',site_name='Site',site_address='London',contact_name='Test',contact_phone='07000000000')
+    return dict(talent_id=1,start_date='2027-01-04',end_date='2027-01-05',start_time='09:00:00',end_time='17:00:00',site_name='Site',site_address='London SW1A 1AA',contact_name='Test',contact_phone='07000000000')
 
 def test_profile(context):
     c,s,*_=context
@@ -40,9 +40,9 @@ def test_profile(context):
 
 def test_job_permissions_and_archive(context):
     c,s,active,pro,co=context
-    job=c.post('/jobs/',json={'title':'Test','description':'Test'}).json()
+    job=c.post('/jobs/',json={'postcode':'CF48 3PN','title':'Test','description':'Test'}).json()
     active[0]=pro
-    assert c.post('/jobs/',json={'title':'Forbidden','description':'Test'}).status_code==403
+    assert c.post('/jobs/',json={'postcode':'CF48 3PN','title':'Forbidden','description':'Test'}).status_code==403
     active[0]=User(id=3,role='company',email='other@example.com')
     assert c.patch(f'/jobs/{job["id"]}',json={'title':'Hijack'}).status_code==404
     active[0]=co;assert c.delete(f'/jobs/{job["id"]}').status_code==204
@@ -65,7 +65,7 @@ def test_invalid_dates(context,field,value):
 
 def test_application_transitions(context):
     c,s,active,pro,co=context
-    job=c.post('/jobs/',json={'title':'Engineer','description':'Test'}).json();active[0]=pro
+    job=c.post('/jobs/',json={'postcode':'CF48 3PN','title':'Engineer','description':'Test'}).json();active[0]=pro
     a=c.post(f'/jobs/{job["id"]}/apply',json={}).json()
     assert c.patch(f'/applications/{a["id"]}',json={'status':'shortlisted'}).status_code==409
     active[0]=co;assert c.patch(f'/applications/{a["id"]}',json={'status':'shortlisted'}).status_code==200
@@ -156,7 +156,7 @@ def test_agency_submission_ownership_and_withdrawal(context):
         Talent(id=3, agency_id=3, representation_confirmed_at=datetime(2026,1,1), notice_provided_on=date(2026,1,1), first_name='Agency', last_name='Professional', profession_category='engineering', profession='Engineer', location='London'),
         Talent(id=4, agency_id=4, first_name='Other', last_name='Professional', profession_category='engineering', profession='Engineer', location='London')])
     s.commit()
-    job = c.post('/jobs/', json={'title': 'Agency opportunity', 'description': 'Test'}).json()
+    job = c.post('/jobs/', json={'postcode':'CF48 3PN','title': 'Agency opportunity', 'description': 'Test'}).json()
     active[0] = agency
     assert c.post(f'/jobs/{job["id"]}/apply', json={}).status_code == 422
     for talent_id in [1, 4, 999]:
@@ -221,7 +221,7 @@ def test_cancel_pending_request_does_not_cancel_confirmed_booking(context):
 
 def test_withdrawn_application_cannot_be_booked(context):
     c, s, active, pro, co = context
-    job = c.post('/jobs/', json={'title':'Test','description':'Test'}).json()
+    job = c.post('/jobs/', json={'postcode':'CF48 3PN','title':'Test','description':'Test'}).json()
     active[0] = pro
     application = c.post(f'/jobs/{job["id"]}/apply', json={}).json()
     body = payload(); body.update(jobpost_id=job['id'], application_id=application['id'])
@@ -237,7 +237,7 @@ def test_withdrawn_application_cannot_be_booked(context):
 
 def test_booking_acceptance_updates_application(context):
     c, s, active, pro, co = context
-    job = c.post('/jobs/', json={'title':'Test','description':'Test'}).json()
+    job = c.post('/jobs/', json={'postcode':'CF48 3PN','title':'Test','description':'Test'}).json()
     active[0] = pro
     application = c.post(f'/jobs/{job["id"]}/apply', json={}).json()
     body = payload(); body.update(jobpost_id=job['id'], application_id=application['id'])
@@ -251,7 +251,7 @@ def test_booking_acceptance_updates_application(context):
 
 def test_company_dashboard_includes_direct_bookings_and_archived_job_history(context):
     c, s, active, pro, co = context
-    job = c.post('/jobs/', json={'title': 'Historical job', 'description': 'Test'}).json()
+    job = c.post('/jobs/', json={'postcode':'CF48 3PN','title': 'Historical job', 'description': 'Test'}).json()
     active[0] = pro
     assert c.post(f'/jobs/{job["id"]}/apply', json={}).status_code == 200
     active[0] = co

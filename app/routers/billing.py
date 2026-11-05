@@ -17,6 +17,7 @@ from models.company import Company
 from models.billing import BillingAccount, LaunchOffer, LaunchRedemption, BillingEvent
 from app.billing import AMOUNTS, enabled, ready, price_id, access
 from app.notifications import enqueue
+from app.uk_eligibility import uk_business_profile
 
 router=APIRouter(prefix='/billing',tags=['billing'])
 BASE='https://www.contractpros.co.uk'
@@ -27,6 +28,7 @@ class CheckoutInput(BaseModel):
     terms_accepted: StrictBool = False
 class CodeInput(BaseModel):
     code: str
+    uk_business: StrictBool = False
 
 def stripe(method,path,data=None,key=None):
     secret=os.getenv('STRIPE_SECRET_KEY','')
@@ -98,11 +100,11 @@ def redeem(body:CodeInput,user:User=Depends(require_role('company','agency')),se
     throttle(session,user,'redeem')
     if not enabled():raise HTTPException(503,'The launch offer is not open yet.')
     if body.code.strip().upper()!='FOUNDERS100':raise HTTPException(400,'That launch code is not valid.')
+    if not body.uk_business:raise HTTPException(422,'Confirm that you represent a UK-based business.')
     account=locked_account(session,user)
     if session.get(LaunchRedemption,user.id):raise HTTPException(409,'This account has already used the launch offer.')
     if account.subscription_id or account.checkout_id or account.checkout_attempt:raise HTTPException(409,'Contact support before redeeming an offer after starting checkout.')
-    profile=session.exec(select(Company).where(Company.owner_id==user.id)).first()
-    if not profile or not profile.name.strip():raise HTTPException(409,'Save your business profile before redeeming the launch code.')
+    profile=uk_business_profile(session,user)
     business='number:'+re.sub(r'\W','',profile.registration_number or '').upper() if profile.registration_number else 'name:'+re.sub(r'\W','',profile.name).casefold()
     key=hashlib.sha256(business.encode()).hexdigest()
     if session.exec(select(LaunchRedemption).where(LaunchRedemption.business_key==key)).first():raise HTTPException(409,'This business has already used the launch offer.')
@@ -122,10 +124,11 @@ def checkout(body:CheckoutInput,user:User=Depends(require_role('company','agency
     if not body.uk_business or not body.terms_accepted:raise HTTPException(422,'Confirm that you represent a UK business and accept the subscription terms.')
     if body.interval not in ('month','year'):raise HTTPException(422,'Choose monthly or annual billing.')
     a=locked_account(session,user)
+    uk_business_profile(session,user)
     grant=session.get(LaunchRedemption,user.id)
     if grant and grant.expires_at>datetime.utcnow():raise HTTPException(409,'Enjoy your free access first. Choose a paid plan when it ends.')
     if a.customer_id:
-        # Scope country restrictions to this platform in RMC's shared Stripe account.
+        # Identify this platform in RMC's shared account; card country is unrestricted.
         stripe('POST','customers/'+quote(a.customer_id),{'metadata[contractpros]':'true'})
         reconcile(session,a)
     if a.status in ('active','trialing','past_due','unpaid','incomplete','paused'):raise HTTPException(409,'Manage your existing subscription instead of creating another one.')
@@ -157,6 +160,7 @@ def checkout(body:CheckoutInput,user:User=Depends(require_role('company','agency
       'line_items[0][price]':price['id'],'line_items[0][quantity]':'1','line_items[0][tax_rates][0]':tax['id'],
       'metadata[interval]':body.interval,'subscription_data[metadata][user_id]':str(user.id),'subscription_data[metadata][terms_version]':'2026-11-03','subscription_data[metadata][uk_business]':'true',
       'billing_address_collection':'required','payment_method_types[0]':'card',
+      'adaptive_pricing[enabled]':'false',
       'success_url':BASE+'/dashboard/billing?checkout=success','cancel_url':BASE+'/dashboard/billing?checkout=cancelled',
       'expires_at':str(int(time.time())+1800)}
     payload['expires_at']=str(int(a.checkout_expires.replace(tzinfo=__import__('datetime').timezone.utc).timestamp()))

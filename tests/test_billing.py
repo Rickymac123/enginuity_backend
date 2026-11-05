@@ -12,7 +12,7 @@ from app.billing import access
 def ctx(agency_context,monkeypatch):
  c,s,active,users=agency_context;c.app.include_router(billing.router)
  monkeypatch.setenv('BILLING_ENABLED','true')
- s.add(LaunchOffer(code='FOUNDERS100'));s.add(Company(owner_id=1,name='Agency One',registration_number='12345678'));s.add(Company(owner_id=2,name='Company Two'));s.commit()
+ s.add(LaunchOffer(code='FOUNDERS100'));s.add(Company(postcode='CF48 3PN',owner_id=1,name='Agency One',registration_number='12345678'));s.add(Company(postcode='CF48 3PN',owner_id=2,name='Company Two'));s.commit()
  return c,s,active,users
 
 def configured(monkeypatch):
@@ -25,33 +25,33 @@ def configured(monkeypatch):
 
 def test_offer_once_shared_cap_and_expiry(ctx):
  c,s,a,u=ctx
- assert c.post('/billing/redeem',json={'code':'bad'}).status_code==400
- assert c.post('/billing/redeem',json={'code':' founders100 '}).json()['access']=='founder'
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==409
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'bad'}).status_code==400
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':' founders100 '}).json()['access']=='founder'
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==409
  grant=s.get(LaunchRedemption,1);assert 89<(grant.expires_at-datetime.utcnow()).days<93
  grant.expires_at=datetime.utcnow()-timedelta(seconds=1);s.add(grant);s.commit()
  assert access(s,u[0])=='subscription_required'
  assert c.get('/agency/booking-requests').status_code==200
  assert c.post('/talent/',json={}).status_code==402
  offer=s.get(LaunchOffer,'FOUNDERS100');offer.redeemed=100;s.add(offer);s.commit();a[0]=u[1]
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==409
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==409
  assert s.get(LaunchOffer,'FOUNDERS100').redeemed==100
 
 def test_duplicate_business_not_double_counted(ctx):
  c,s,a,u=ctx
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==200
- a[0]=u[2];s.add(Company(owner_id=3,name='Different trading name',registration_number='12345678'));s.commit()
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==409
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==200
+ a[0]=u[2];s.add(Company(postcode='CF48 3PN',owner_id=3,name='Different trading name',registration_number='12345678'));s.commit()
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==409
  assert s.get(LaunchOffer,'FOUNDERS100').redeemed==1
 
 def test_disabled_rollout_and_free_professional(ctx,monkeypatch):
  c,s,a,u=ctx;monkeypatch.setenv('BILLING_ENABLED','false')
  assert c.get('/billing/status').json()['access']=='setup'
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==503
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==503
  assert c.post('/billing/checkout',json={'uk_business':True,'terms_accepted':True,'interval':'month'}).status_code==503
  a[0].role='professional';s.add(a[0]);s.commit()
  assert c.get('/billing/status').json()['access']=='free'
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==403
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==403
 
 def test_paid_access_expiry_failure_and_cancellation(ctx):
  c,s,a,u=ctx
@@ -89,7 +89,7 @@ def test_checkout_server_prices_customer_binding_and_duplicate(ctx,monkeypatch):
 
 def test_founder_cannot_be_charged_during_free_access(ctx,monkeypatch):
  c,s,a,u=ctx;configured(monkeypatch)
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==200
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==200
  monkeypatch.setattr(billing,'stripe',lambda *a,**k:pytest.fail('No Stripe call during free access'))
  assert c.post('/billing/checkout',json={'uk_business':True,'terms_accepted':True,'interval':'month'}).status_code==409
 
@@ -159,18 +159,18 @@ def test_reminders_are_once_and_never_charge(ctx,monkeypatch):
  assert s.get(BillingAccount,1) is None
 
 
-def test_live_checkout_requires_verified_uk_restrictions(ctx,monkeypatch):
+def test_live_checkout_accepts_any_card_country_with_rollout_gate(ctx,monkeypatch):
  from app.billing import ready
  configured(monkeypatch)
  monkeypatch.setenv('STRIPE_MODE','live')
  monkeypatch.setenv('STRIPE_SECRET_KEY','sk_live_fake_local_only')
  monkeypatch.delenv('STRIPE_UK_RESTRICTIONS_VERIFIED',raising=False)
- assert not ready()
- monkeypatch.setenv('STRIPE_UK_RESTRICTIONS_VERIFIED','true')
  assert ready()
+ monkeypatch.setenv('BILLING_ENABLED','false')
+ assert not ready()
 
 def test_pending_checkout_cannot_claim_free_offer(ctx):
  c,s,a,u=ctx
  s.add(BillingAccount(user_id=1,checkout_attempt='pending'));s.commit()
- assert c.post('/billing/redeem',json={'code':'FOUNDERS100'}).status_code==409
+ assert c.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'}).status_code==409
  assert s.get(LaunchOffer,'FOUNDERS100').redeemed==0

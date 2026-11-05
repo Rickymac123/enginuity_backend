@@ -45,7 +45,7 @@ def test_agency_full_lifecycle_and_tenant_boundaries(agency_context, legacy_requ
     assert c.post(f'/talent/{tid}/representation',json=evidence()).status_code==404
     assert c.patch(f'/talent/{tid}',json={'first_name':'Stolen'}).status_code==404
     assert c.delete(f'/talent/{tid}').status_code==404
-    active[0]=users[1];j=c.post('/jobs/',json={'title':'Synthetic job','description':'Local acceptance only'}).json()
+    active[0]=users[1];j=c.post('/jobs/',json={'postcode':'CF48 3PN','title':'Synthetic job','description':'Local acceptance only'}).json()
     active[0]=users[0];a=c.post(f'/jobs/{j["id"]}/apply',json={'talent_id':tid});assert a.status_code==200,a.text
     assert c.get('/agency/applications').json()[0]['talent_id']==tid
     active[0]=users[1];assert c.get(f'/jobs/{j["id"]}/applications').json()[0]['talent_id']==tid
@@ -70,7 +70,7 @@ def test_agency_full_lifecycle_and_tenant_boundaries(agency_context, legacy_requ
 def test_legacy_profile_requires_record_before_submission(agency_context):
     c,s,active,users=agency_context
     t=Talent(first_name='Legacy',last_name='Test',profession_category='engineering',profession='Engineer',location='London',agency_id=1);s.add(t);s.commit();s.refresh(t)
-    active[0]=users[1];j=c.post('/jobs/',json={'title':'Test','description':'Test'}).json();active[0]=users[0]
+    active[0]=users[1];j=c.post('/jobs/',json={'postcode':'CF48 3PN','title':'Test','description':'Test'}).json();active[0]=users[0]
     assert c.post(f'/jobs/{j["id"]}/apply',json={'talent_id':t.id}).status_code==409
     assert c.post(f'/talent/{t.id}/representation',json=evidence()).status_code==200
     assert c.post(f'/jobs/{j["id"]}/apply',json={'talent_id':t.id}).status_code==200
