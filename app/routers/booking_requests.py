@@ -1,3 +1,4 @@
+from app.billing import require_subscription
 from datetime import datetime, timedelta
 from typing import List
 
@@ -32,6 +33,7 @@ def create_booking_request(
     payload: BookingRequestCreate,
     user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
+    subscription_access = Depends(require_subscription),
 ):
     if payload.end_date < payload.start_date or (payload.end_date - payload.start_date).days > 366 or payload.end_time <= payload.start_time:
         raise HTTPException(status_code=422, detail="INVALID_BOOKING_DATES_OR_TIMES")

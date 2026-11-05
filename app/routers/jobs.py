@@ -1,3 +1,4 @@
+from app.billing import require_subscription
 from typing import List, Optional
 from datetime import datetime
 
@@ -29,6 +30,7 @@ def create_job(
     job: JobPostCreate,
     user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
+    subscription_access = Depends(require_subscription),
 ):
     job_post = JobPost(**job.model_dump(), company_id=user.id)
     session.add(job_post)
@@ -170,6 +172,7 @@ def restore_job(
     job_id: int,
     user: User = Depends(require_role("company")),
     session: Session = Depends(get_session),
+    subscription_access = Depends(require_subscription),
 ):
     job = session.get(JobPost, job_id)
     if not job or job.company_id != user.id:
