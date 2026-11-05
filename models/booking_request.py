@@ -5,6 +5,8 @@ from sqlmodel import SQLModel, Field
 
 
 class BookingRequest(SQLModel, table=True):
+    client_payment_due_days: Optional[int] = None
+    client_terms_revision: Optional[int] = None
     id: Optional[int] = Field(default=None, primary_key=True)
 
     company_id: int = Field(index=True, nullable=False)
@@ -59,6 +61,8 @@ class BookingRequestRespond(SQLModel):
 
 
 class BookingRequestRead(SQLModel):
+    client_payment_due_days: Optional[int] = None
+    client_terms_revision: Optional[int] = None
     id: int
     company_id: int
     talent_id: int

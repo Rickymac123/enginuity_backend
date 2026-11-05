@@ -1,4 +1,5 @@
 from app.billing import require_subscription
+from app.routers.client_terms import terms_for
 from datetime import datetime, timedelta
 from typing import List
 
@@ -98,7 +99,10 @@ def create_booking_request(
     if still_pending:
         raise HTTPException(status_code=400, detail="PENDING_BOOKING_REQUEST_ALREADY_EXISTS")
 
+    terms = terms_for(session,user.id)
     req = BookingRequest(
+        client_payment_due_days=terms["payment_due_days"],
+        client_terms_revision=terms["revision"],
         company_id=user.id,
         talent_id=payload.talent_id,
         jobpost_id=application.jobpost_id if payload.application_id is not None else payload.jobpost_id,
@@ -257,6 +261,8 @@ def accept_booking_request(
         session.add(application)
 
     booking = Booking(
+        client_payment_due_days=req.client_payment_due_days,
+        client_terms_revision=req.client_terms_revision,
         booking_request_id=req.id,
         company_id=req.company_id,
         talent_id=req.talent_id,

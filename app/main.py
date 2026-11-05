@@ -32,6 +32,8 @@ from app.routers.billing import router as billing_router
 
 app = FastAPI(title="ContractPros API")
 app.include_router(billing_router)
+from app.routers.client_terms import router as client_terms_router
+app.include_router(client_terms_router)
 
 @app.middleware("http")
 async def limit_public_requests(request, call_next):
