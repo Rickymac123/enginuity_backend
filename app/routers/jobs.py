@@ -1,4 +1,5 @@
 from app.billing import require_subscription
+from app.uk_eligibility import uk_postcode
 from typing import List, Optional
 from datetime import datetime
 
@@ -32,6 +33,7 @@ def create_job(
     session: Session = Depends(get_session),
     subscription_access = Depends(require_subscription),
 ):
+    job.postcode = uk_postcode(job.postcode)
     job_post = JobPost(**job.model_dump(), company_id=user.id)
     session.add(job_post)
     session.commit()
@@ -137,6 +139,7 @@ def update_job(
         raise HTTPException(status_code=404, detail="Job not found")
 
     update_data = job_update.model_dump(exclude_unset=True)
+    update_data["postcode"] = uk_postcode(update_data.get("postcode", db_job.postcode))
     update_data["updated_at"] = datetime.utcnow()
 
     for key, value in update_data.items():

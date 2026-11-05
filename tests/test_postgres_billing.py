@@ -28,7 +28,7 @@ def test_founders_concurrent_redemptions(monkeypatch,same_business):
   with Session(engine) as s:
    for i in [1,2]:s.add(User(id=i,email=f'{i}@example.com',hashed_password='unused',role='agency',is_active=True,is_verified=True))
    s.commit()
-   for i in [1,2]:s.add(Company(owner_id=i,name=f'Business {i}',registration_number='SAME' if same_business else str(i)))
+   for i in [1,2]:s.add(Company(postcode='CF48 3PN',owner_id=i,name=f'Business {i}',registration_number='SAME' if same_business else str(i)))
    offer=s.get(LaunchOffer,'FOUNDERS100');offer.redeemed=0 if same_business else 99;s.add(offer);s.commit()
   app=FastAPI();app.include_router(router)
   def db():
@@ -38,7 +38,7 @@ def test_founders_concurrent_redemptions(monkeypatch,same_business):
   def redeem(i):
    with TestClient(app) as client:
     barrier.wait(timeout=10)
-    return client.post('/billing/redeem',json={'code':'FOUNDERS100'},headers={'x-test-user':str(i)}).status_code
+    return client.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'},headers={'x-test-user':str(i)}).status_code
   with ThreadPoolExecutor(max_workers=2) as pool:result=list(pool.map(redeem,[1,2]))
   assert sorted(result)==[200,409]
   with Session(engine) as s:

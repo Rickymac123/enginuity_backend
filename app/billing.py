@@ -13,8 +13,6 @@ AMOUNTS = {'company': {'month':2900,'year':29000}, 'agency':{'month':5900,'year'
 def enabled(): return os.getenv('BILLING_ENABLED','false').lower() == 'true'
 def price_id(role, interval): return os.getenv(f'STRIPE_PRICE_{role.upper()}_{interval.upper()}', '')
 def ready():
-    if os.getenv('STRIPE_MODE','test') == 'live' and os.getenv('STRIPE_UK_RESTRICTIONS_VERIFIED','false').lower() != 'true':
-        return False
     return enabled() and os.getenv('STRIPE_MODE','test') in ('test','live') and os.getenv('STRIPE_SECRET_KEY','').startswith('sk_'+os.getenv('STRIPE_MODE','test')+'_') and bool(os.getenv('STRIPE_SECRET_KEY') and os.getenv('STRIPE_WEBHOOK_SECRET') and os.getenv('STRIPE_PORTAL_COMPANY') and os.getenv('STRIPE_PORTAL_AGENCY') and os.getenv('STRIPE_UK_VAT_RATE')) and all(price_id(r,i) for r in AMOUNTS for i in ('month','year'))
 
 def access(session, user):

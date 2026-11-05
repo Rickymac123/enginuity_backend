@@ -1,4 +1,5 @@
 from app.billing import require_subscription
+from app.uk_eligibility import uk_site_address
 from app.routers.client_terms import terms_for
 from datetime import datetime, timedelta
 from typing import List
@@ -38,6 +39,7 @@ def create_booking_request(
 ):
     if payload.end_date < payload.start_date or (payload.end_date - payload.start_date).days > 366 or payload.end_time <= payload.start_time:
         raise HTTPException(status_code=422, detail="INVALID_BOOKING_DATES_OR_TIMES")
+    uk_site_address(payload.site_address)
     talent = session.exec(select(Talent).where(Talent.id == payload.talent_id).with_for_update()).first()
     if not talent:
         raise HTTPException(status_code=404, detail="TALENT_NOT_FOUND")
