@@ -5,6 +5,8 @@ from sqlmodel import SQLModel, Field
 
 
 class Booking(SQLModel, table=True):
+    client_payment_due_days: Optional[int] = None
+    client_terms_revision: Optional[int] = None
     id: Optional[int] = Field(default=None, primary_key=True)
 
     booking_request_id: int = Field(index=True, unique=True)
@@ -53,6 +55,8 @@ class BookingCreate(SQLModel):
 
 
 class BookingRead(SQLModel):
+    client_payment_due_days: Optional[int] = None
+    client_terms_revision: Optional[int] = None
     id: int
     booking_request_id: int
     company_id: int

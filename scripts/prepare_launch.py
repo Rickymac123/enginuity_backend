@@ -8,11 +8,19 @@ def migrate(engine):
         if connection.dialect.name == "postgresql":
             connection.execute(text("SELECT pg_advisory_xact_lock(7392841)"))
         from auth.models import User
+        from models.client_terms import ClientPaymentTerms, ClientPaymentTermsAudit
+        for model in (ClientPaymentTerms, ClientPaymentTermsAudit):
+            model.__table__.create(connection, checkfirst=True)
         from models.billing import BillingAccount, LaunchOffer, LaunchRedemption, BillingEvent
         for model in (BillingAccount, LaunchOffer, LaunchRedemption, BillingEvent):
             model.__table__.create(connection, checkfirst=True)
         connection.execute(text("INSERT INTO launchoffer (code, redeemed, capacity) SELECT 'FOUNDERS100', 0, 100 WHERE NOT EXISTS (SELECT 1 FROM launchoffer WHERE code='FOUNDERS100')"))
         tables = inspect(connection).get_table_names()
+        for table in ('bookingrequest','booking'):
+            if table in tables:
+                columns={c['name'] for c in inspect(connection).get_columns(table)}
+                for name in ('client_payment_due_days','client_terms_revision'):
+                    if name not in columns:connection.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} INTEGER'))
         if "review" in tables:
             if "booking_id" not in {c["name"] for c in inspect(connection).get_columns("review")}:
                 connection.execute(text("ALTER TABLE review ADD COLUMN booking_id INTEGER REFERENCES booking(id)"))
