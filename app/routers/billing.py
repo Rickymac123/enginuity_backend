@@ -111,9 +111,12 @@ def redeem(body:CodeInput,user:User=Depends(require_role('company','agency')),se
     result=session.execute(update(LaunchOffer).where(LaunchOffer.code=='FOUNDERS100',LaunchOffer.redeemed<LaunchOffer.capacity).values(redeemed=LaunchOffer.redeemed+1))
     if result.rowcount!=1:raise HTTPException(409,'All 100 launch places have been claimed.')
     end=datetime.utcnow()+relativedelta(months=3)
-    session.add(LaunchRedemption(user_id=user.id,business_key=key,expires_at=end))
-    enqueue(session,f'founder-start:{user.id}',user.id,'Your ContractPros launch access is active',f'Your free launch access ends on {end:%d %B %Y}. No card was collected and you will not be charged automatically.','/dashboard/billing')
-    try:session.commit()
+    try:
+        session.add(LaunchRedemption(user_id=user.id,business_key=key,expires_at=end))
+        # Enqueue queries can autoflush the redemption before commit. Catch conflicts
+        # across the entire transaction so the reserved place is rolled back too.
+        enqueue(session,f'founder-start:{user.id}',user.id,'Your ContractPros launch access is active',f'Your free launch access ends on {end:%d %B %Y}. No card was collected and you will not be charged automatically.','/dashboard/billing')
+        session.commit()
     except IntegrityError:session.rollback();raise HTTPException(409,'This business has already used the launch offer.')
     return public_status(session,user)
 

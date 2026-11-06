@@ -8,6 +8,13 @@ def migrate(engine):
         if connection.dialect.name == "postgresql":
             connection.execute(text("SELECT pg_advisory_xact_lock(7392841)"))
         from auth.models import User
+        from models.booking import Booking
+        from models.talent import Talent
+        from models.work_billing import WorkBillingSettings, BookingRate, WorkAudit, WorkTimesheet, WorkInvoice, QuickBooksClient, QuickBooksConnection, QuickBooksFlow
+        for model in (WorkBillingSettings, BookingRate, WorkAudit, WorkTimesheet, WorkInvoice, QuickBooksClient, QuickBooksConnection, QuickBooksFlow):
+            model.__table__.create(connection, checkfirst=True)
+        connection.execute(text("INSERT INTO workbillingsettings (id, markup_bps, revision) SELECT 1, 2000, 0 WHERE NOT EXISTS (SELECT 1 FROM workbillingsettings WHERE id=1)"))
+        from auth.models import User
         from models.client_terms import ClientPaymentTerms, ClientPaymentTermsAudit
         for model in (ClientPaymentTerms, ClientPaymentTermsAudit):
             model.__table__.create(connection, checkfirst=True)
