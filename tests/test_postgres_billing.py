@@ -5,7 +5,7 @@ from threading import Barrier
 import pytest
 from fastapi import FastAPI,Request,Depends
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import text, event
 from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel,Session,create_engine,select
 from auth.models import User
@@ -39,7 +39,16 @@ def test_founders_concurrent_redemptions(monkeypatch,same_business):
    with TestClient(app) as client:
     barrier.wait(timeout=10)
     return client.post('/billing/redeem',json={'uk_business':True,'code':'FOUNDERS100'},headers={'x-test-user':str(i)}).status_code
+  if same_business:
+   # Force both prechecks to see an unused business before either insert. This
+   # exercises the autoflush conflict inside notification enqueue reliably.
+   checked=Barrier(2)
+   def after_check(conn,cursor,statement,parameters,context,executemany):
+    if 'WHERE launchredemption.business_key =' in statement:
+     checked.wait(timeout=10)
+   event.listen(engine,'after_cursor_execute',after_check)
   with ThreadPoolExecutor(max_workers=2) as pool:result=list(pool.map(redeem,[1,2]))
+  if same_business:event.remove(engine,'after_cursor_execute',after_check)
   assert sorted(result)==[200,409]
   with Session(engine) as s:
    assert len(s.exec(select(LaunchRedemption)).all())==1
