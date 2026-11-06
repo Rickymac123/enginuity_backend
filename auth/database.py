@@ -1,3 +1,4 @@
+from models.work_billing import WorkBillingSettings, BookingRate, WorkAudit, WorkTimesheet, WorkInvoice, QuickBooksClient, QuickBooksConnection, QuickBooksFlow
 # auth/database.py
 from typing import Generator
 from sqlmodel import SQLModel, Session

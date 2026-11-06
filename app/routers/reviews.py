@@ -259,4 +259,6 @@ def send_review_reminders(
     session.commit()
     from app.notifications import deliver_pending
     notifications = deliver_pending(session)
+    from app.quickbooks_work import process_pending
+    process_pending(session)
     return {"sent": sent + notifications["sent"], "failed": failed + notifications["failed"], "candidates": len(verifications), "notifications": notifications}

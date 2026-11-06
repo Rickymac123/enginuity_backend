@@ -133,3 +133,7 @@ def health():
 @app.get("/")
 def read_root():
     return {"message": "Welcome to ContractPros API"}
+from app.routers.work_billing import router as work_billing_router
+from app.routers.quickbooks_connect import router as quickbooks_connect_router
+app.include_router(work_billing_router)
+app.include_router(quickbooks_connect_router)
