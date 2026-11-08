@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from sqlmodel import Session, select
+from sqlalchemy import func
 
 from auth.database import get_session
 from auth.users import fastapi_users
@@ -23,6 +24,8 @@ router = APIRouter(tags=["reviews"])
 
 FRONTEND_BASE_URL = os.getenv("FRONTEND_BASE_URL", "http://localhost:3000").rstrip("/")
 REMINDER_JOB_SECRET = os.getenv("REMINDER_JOB_SECRET", "")
+
+EXTERNAL_REVIEW_LIMIT = 2
 
 current_active_user = fastapi_users.current_user(active=True, verified=True)
 
@@ -68,11 +71,39 @@ def send_review_verification_email(to_email: str, verify_url: str) -> None:
     )
 
 
+def lock_review_owner(session: Session, professional_id: int) -> None:
+    # Serialize reservations and submissions for this professional in PostgreSQL.
+    owner = session.exec(select(User).where(User.id == professional_id).with_for_update()).first()
+    if owner is None:
+        raise HTTPException(status_code=404, detail="PROFESSIONAL_NOT_FOUND")
+
+
+def external_review_count(session: Session, professional_id: int) -> int:
+    # Pending/private/rejected submissions still consume a lifetime slot.
+    return session.exec(select(func.count()).select_from(Review).where(
+        Review.professional_id == professional_id, Review.source == "imported"
+    )).one()
+
+
+def review_limit_error() -> HTTPException:
+    return HTTPException(status_code=409, detail="EXTERNAL_REVIEW_LIMIT_REACHED")
+
+
 @router.post("/professional/review-invites")
 def create_review_invite(
     session: Session = Depends(get_session),
     user: User = Depends(require_professional),
 ) -> Dict[str, Any]:
+    lock_review_owner(session, user.id)
+    used = external_review_count(session, user.id)
+    now = utcnow()
+    reserved = session.exec(select(func.count()).select_from(ReviewInvite).where(
+        ReviewInvite.professional_id == user.id,
+        ReviewInvite.uses == 0,
+        ReviewInvite.expires_at >= now,
+    )).one()
+    if used + reserved >= EXTERNAL_REVIEW_LIMIT:
+        raise review_limit_error()
     raw_token = generate_token()
 
     invite = ReviewInvite(
@@ -90,6 +121,7 @@ def create_review_invite(
     return {
         "invite_url": f"{FRONTEND_BASE_URL}/reviews/submit?token={raw_token}",
         "expires_at": invite.expires_at,
+        "remaining": max(0, EXTERNAL_REVIEW_LIMIT - used - reserved - 1),
     }
 
 
@@ -112,6 +144,11 @@ def submit_imported_review(
 
     if invite.uses >= invite.max_uses:
         raise HTTPException(status_code=400, detail="INVITE_ALREADY_USED")
+
+    lock_review_owner(session, invite.professional_id)
+    # Also enforce at submission, including links issued before this cap existed.
+    if external_review_count(session, invite.professional_id) >= EXTERNAL_REVIEW_LIMIT:
+        raise review_limit_error()
 
     review = Review(
         professional_id=invite.professional_id,
