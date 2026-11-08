@@ -137,3 +137,6 @@ from app.routers.work_billing import router as work_billing_router
 from app.routers.quickbooks_connect import router as quickbooks_connect_router
 app.include_router(work_billing_router)
 app.include_router(quickbooks_connect_router)
+
+from app.routers.ir35 import router as ir35_router
+app.include_router(ir35_router)

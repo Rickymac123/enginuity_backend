@@ -65,7 +65,7 @@ def dashboard(user:User=Depends(current_user),session:Session=Depends(get_sessio
             if role in ('admin','company'):r['client_rate_pence']=charge(60,rate.contractor_pence,rate.markup_bps)[0]
             if role=='admin':r['markup_bps']=rate.markup_bps
         sheets=session.exec(select(WorkTimesheet).where(WorkTimesheet.booking_id==b.id).order_by(WorkTimesheet.week_start.desc())).all()
-        items.append({'id':b.id,'company_id':b.company_id,'site_name':b.site_name,'start_date':b.start_date,'end_date':b.end_date,'status':b.status,'professional':f'{t.first_name} {t.last_name}' if t else 'Professional','rate':r,'timesheets':[view(session,user,s) for s in sheets]})
+        items.append({'id':b.id,'booking_request_id':b.booking_request_id,'company_id':b.company_id,'site_name':b.site_name,'start_date':b.start_date,'end_date':b.end_date,'status':b.status,'professional':f'{t.first_name} {t.last_name}' if t else 'Professional','rate':r,'timesheets':[view(session,user,s) for s in sheets]})
     settings=session.get(WorkBillingSettings,1)
     result={'role':user.role,'bookings':items,'issuing_enabled':os.getenv('WORK_INVOICING_ENABLED')=='true'}
     if user.role=='admin':
