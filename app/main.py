@@ -128,7 +128,7 @@ def on_startup():
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "commit": os.environ.get("RENDER_GIT_COMMIT")}
 
 @app.get("/")
 def read_root():
