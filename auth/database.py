@@ -7,6 +7,7 @@ from app.db import engine, get_session  # Shared dependency: one session per req
 
 # IMPORTANT: ensure models are imported so SQLModel registers tables
 from auth.models import User  # noqa: F401
+from models.registration_metrics import RegistrationEvent, RegistrationCoverage, ensure_registration_coverage
 from models.client_terms import ClientPaymentTerms, ClientPaymentTermsAudit
 from models.billing import BillingAccount, LaunchOffer, LaunchRedemption, BillingEvent  # noqa: F401
 from app.rate_limits import RequestWindow  # noqa: F401
@@ -25,3 +26,4 @@ from models.jobpost import JobPost  # noqa: F401
 def init_db() -> None:
     print("INIT_DB tables:", sorted(SQLModel.metadata.tables.keys()))
     SQLModel.metadata.create_all(engine)
+    ensure_registration_coverage(engine)
