@@ -6,6 +6,7 @@ from fastapi_users import exceptions
 from auth.models import User
 from models.talent import Talent
 from models.social_auth import RegistrationEmail
+from models.registration_metrics import RegistrationEvent
 
 
 def create_account(session, payload, password_hash, verified=False):
@@ -41,6 +42,7 @@ def create_account(session, payload, password_hash, verified=False):
         session.flush()
     # Keep the database lock until commit, without permanently reserving
     # deleted accounts' email addresses.
+    session.add(RegistrationEvent(role=user.role))
     session.delete(claim)
     session.flush()
     return user
